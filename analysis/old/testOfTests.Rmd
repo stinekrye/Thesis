@@ -1,0 +1,90 @@
+---
+title: "2_Test_of_tests"
+author: "stinekrye"
+date: "2022-02-07"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+In order to see which direction to proceed, and how troublesome it is to get the test running, I will try with DESEQ2 because it looks like it is easy to run.
+
+```{r}
+library(tidyverse)
+library(DESeq2)
+library(readxl)
+library(apeglm)
+library(phyloseq)
+
+ASV_table <- read.delim("./data/oil_ASVtable.txt", sep = "\t", check.names = F)
+sample_data <- read_excel("./data/sampleData.xlsx")
+```
+
+Subset data
+
+```{r}
+# Idea: Subset sample_data, then subset the correct samples from ASV_table
+GF_sample_data <- sample_data %>% filter(region == "GF" & type == "insitu") # All 
+GF_sample_data <- column_to_rownames(GF_sample_data, "Samples")
+GF_sample_data <- GF_sample_data %>% mutate(oil_logical = ifelse(oil == "blank", "0","1"))
+GF_sample_data$days <- as.factor(GF_sample_data$days)
+
+GF_ASV <- ASV_table %>% select(ASVs, colnames(.)[colnames(.) %in% rownames(GF_sample_data)])
+GF_ASV <- column_to_rownames(GF_ASV, var = "ASVs")
+
+# Remove all empty samples
+message(paste("The empty samples are:", colnames(GF_ASV)[colSums(GF_ASV) == 0], collapse = ""))
+GF_sample_data <-  GF_sample_data %>% filter(!rownames(.) %in% colnames(GF_ASV)[colSums(GF_ASV) == 0])
+GF_ASV <- GF_ASV %>% select(!colnames(GF_ASV)[colSums(GF_ASV) == 0])
+
+# Remove empty ASVs
+GF_ASV <- GF_ASV %>% filter(rowSums(.) > 0)
+
+
+#Check that the order of the samples are consistent!
+all(rownames(GF_sample_data) == colnames(GF_ASV))
+
+# Remove zeroes
+replace_val <- 1
+message(paste("Zeroes are replaced with", replace_val, collapse = ""))
+GF_ASV[GF_ASV == 0] <- replace_val
+
+```
+
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = GF_ASV,
+                              colData = GF_sample_data,
+                              design= ~ location + oil_logical + days)
+dds
+```
+
+# Run DESeq2
+```{r}
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds)
+res
+```
+
+
+See results for oil vs no oil
+```{r}
+res <- results(dds, name = "oil_logical_1_vs_0" )
+res <- res[order(res$pvalue),]
+res
+```
+
+
+```{r}
+resLFC <- lfcShrink(dds, coef="oil_logical_1_vs_0", type="apeglm")
+resLFCOrdered <- resLFC[order(resLFC$padj),]
+LFC_significant <- resLFCOrdered[na.omit(resLFCOrdered$padj) < 0.05,]
+LFC_significantCOrdered <- LFC_significant[order(LFC_significant$log2FoldChange),]
+View(as.data.frame(LFC_significantCOrdered@listData))
+```
+
+Might make sense if this is redone with the taxa names

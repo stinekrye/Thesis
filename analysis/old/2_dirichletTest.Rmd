@@ -1,0 +1,108 @@
+---
+title: "test"
+author: "Stine"
+date: "18/3/2022"
+output: html_document
+---
+
+Plan:
+- Try to estimate parameters from data
+- Try to simulate data
+- Try to make a taxon differential abundant
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(HMP)
+asvTable <- read.delim("../data/oil_ASVtable.txt", sep = "\t", check.names = F, row.names = 1)
+sampleData <- read_excel("../data/sampleData.xlsx")# %>% column_to_rownames(., var = "Samples")
+```
+
+Get background data
+```{r}
+# Transpose asvTable
+asvTable <- asvTable %>% rownames_to_column() %>% pivot_longer(cols = -rowname) %>% pivot_wider(names_from = rowname) %>% column_to_rownames("name") %>%  as.data.frame()
+
+
+META_GF_SW_DEEP <- sampleData %>% filter(region == "GF", type == "SW", location == "deep")
+META_GF_SW_SURFACE <- sampleData %>% filter(region == "GF", type == "SW", location == "surface")
+ASV_GF_SW_DEEP <- asvTable %>% filter(rownames(.) %in% META_GF_SW_DEEP$Samples) %>% select(!which(colSums(.) == 0))
+ASV_GF_SW_SURFACE <- asvTable %>% filter(rownames(.) %in% META_GF_SW_SURFACE$Samples)%>% select(!which(colSums(.) == 0))
+ASV_GF_SW_SURFACE_FILTER <- ASV_GF_SW_SURFACE[apply(ASV_GF_SW_SURFACE, 2, function(row) all(row !=0 ))]
+```
+
+
+Simulate data
+
+```{r}
+### Generate a the number of reads per sample
+### The first number is the number of reads and the second is the number of subjects
+nrs <- rep(100,8) 
+
+### Get gamma from the dirichlet-multinomial parameters
+shape <- dirmult(ASV_GF_SW_SURFACE_FILTER)$gamma
+
+dmData <- as.data.frame(Dirichlet.multinomial(nrs, shape))
+dmData[1:5, 1:5]
+# first <- dmData
+```
+
+
+Calculate percentage of zeroes
+```{r}
+real_zero <- sum(ASV_GF_SW_SURFACE == 0)
+simulated_zero <- sum(dmData == 0)
+```
+
+Calculate percentage of "full columns"
+```{r}
+real_full <- ASV_GF_SW_SURFACE[apply(ASV_GF_SW_SURFACE, 2, function(row) all(row !=0 ))]
+simulated_full <- dmData[apply(dmData,2, function(row) all(row !=0 ))]
+```
+
+Ratios
+```{r}
+(real_zero/simulated_zero)
+(ncol(real_full)/ncol(simulated_full))
+
+# Values for "full GF data frame with no zero removal" 0.8 and 2.3, which means that the distribution of zeroes are wrong. We have almost all zeroes, but they are distributed too evenly
+```
+
+
+
+There are too many zeroes
+
+
+
+
+
+
+
+```{r }
+library(HMP)
+
+data(saliva)
+test <- saliva
+test[1:6,1] <- test[1:6,1]*10
+
+### Generate a the number of reads per sample
+### The first number is the number of reads and the second is the number of subjects
+nrs <- rep(15000, 20) 
+
+### Get gamma from the dirichlet-multinomial parameters
+shape <- dirmult(test)$gamma
+
+dmData <- Dirichlet.multinomial(nrs, shape)
+dmData[1:5, 1:5]
+# first <- dmData
+```
+
+
+
+```{r}
+t <- rdirichlet(1000,c(2,2,2))
+colmeans(t)
+t
+```
+

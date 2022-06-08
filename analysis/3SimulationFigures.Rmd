@@ -1,0 +1,142 @@
+---
+title: "3SimulationFigures"
+author: "stinekrye"
+date: "2022-05-03"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+
+
+```{r setup, echo = F, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(here)
+here::i_am("./analysis/2_compositionConstraintTests.Rmd")
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+
+library(tidyverse)
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(qvalue)
+library(kableExtra)
+library(DESeq2)
+library(ALDEx2)
+library(ANCOMBC)
+library(rstatix)
+library(parallel)
+library(ggvenn)
+library(devtools)
+library(RColorBrewer)
+library(venn)
+library(cowplot)
+library(viridis)
+
+
+```
+
+## Read large data frame from cluster and calculate FDR, Sensitivity and specificity
+
+```{r Read large data frame from cluster}
+chunk_size = 10000
+runs <- 10 # Look in the filename and choose the correct value
+
+# Load new large df
+FDRandSensitivity <- largeDfLoad(
+"./data/dataFromClusterMoreFiltering/LogNormalAndNegBinom3#preThresh(0.75).csv", runs, chunck_size)
+# 
+write_csv(FDRandSensitivity, "./data/dataFromClusterMoreFiltering/FDRLogNormalAndNegBinom3#preThresh(0.75).csv")
+
+# Load FDRandSensitivity from an "old" run
+# FDRandSensitivity <- read_csv("G:/Mit drev/Master's Thesis/R-code/data/dataFromClusterMoreFiltering/FDRLogNormalAndNegBinom3#preThresh(0.05).csv")
+
+```
+
+
+```{r Define variables}
+
+# DO NOT CHANGE! MAKE NEW SCRIPT. THESE ARE THE DEFAULT VALUES USED FOR ALL RUNS IN THE FOLDERdataFromClusterMoreFiltering
+change <- c(1,2,3,4,6,8,10)
+sample_size <- c(2,3,4,5,6,7,8,9)
+runs <- 10
+n_taxa <- 10000
+n_random <- c(0, 5, 50, 75, 150) #c(0, 3, 15, 30, 75, 150)
+tests <- c("DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC") #"DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC"
+v <- 2
+s <- 120
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Make plots
+
+```{r Performance plot}
+nr <- 5
+c <- c(1,4,6) # filter change
+# source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+p <- performancePlot(FDRandSensitivity, nr, c)
+print(p)
+```
+
+
+```{r Venn Diagrams data}
+# source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+
+runs
+change
+sample_size
+n_taxa
+n_random
+
+conf_data <- conf # Data
+test <- tests # Tests
+r = runs # run
+c = "8" # change
+j = "8" # sample_size
+m = "10000" # n_taxa
+nr = "30" # n_random
+```
+
+```{r Venn Diagrams, warning = F, plot = F}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+v1 <- makeVenn2(conf_data, test, t = "TP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) # Data, type, data frame, fold change
+v2 <- makeVenn2(conf_data, test, t = "FP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v3 <- makeVenn2(conf_data, test, t = "TN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v4 <- makeVenn2(conf_data, test, t = "FN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+```
+
+```{r}
+plot <- plot_grid(v1, v2, v3, v4, labels = c("TP", "FP", "TN", "FN"))
+plot
+Nas <- getNA(conf_data, test, r, c, j, m, nr)
+# All methods sum to 100 including the counts found in the NA table. NAs are introduced when the abundance of a given taxa is 0.
+```
+
+
+
+
+
+

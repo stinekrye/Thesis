@@ -1,0 +1,485 @@
+---
+title: "6_dataAnalysis"
+author: "stinekrye"
+date: "2022-05-17"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+This script is the source of all figures in the report except the ones from estimating parameters from real data
+
+```{r}
+library(tidyverse)
+library(ggpointdensity)
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(qvalue)
+library(kableExtra)
+library(DESeq2)
+library(ALDEx2)
+library(ANCOMBC)
+library(rstatix)
+library(parallel)
+library(ggvenn)
+library(devtools)
+library(RColorBrewer)
+library(venn)
+library(cowplot)
+library(viridis)
+library(compositions)
+library(readxl)
+library(here)
+library(ggpubr)
+library(gtools)
+library(scales)
+
+here::i_am("./analysis/6_dataAnalysis.Rmd")
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+```
+
+```{r}
+change <- c(1,2,3,4,6,8,10)
+sample_size <- c(2,3,4,5,6,7,8,9)
+runs <- 10
+n_taxa <- 10000
+n_random <- c(0, 5, 50, 75, 150) #c(0, 3, 15, 30, 75, 150)
+tests <- c("DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC") #"DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC"
+v <- 2
+s <- 120
+
+
+# Variables for venn diagram (ONLY THESE WORK!)
+test <- tests # Tests
+r = runs # run
+c = "10" # change
+j = "3" # sample_size
+m = "10000" # n_taxa
+nr = "150" # n_random
+
+
+```
+
+```{r Load performance table}
+path <- "./data/dataFinal/simulatedMergedClrnoClr/"
+filename <- "FDRLogNormalAndNegBinom3All#preThresh(0.25).csv"
+filename1 <- "ConfLogNormalAndNegBinom3All#preThresh(0.05).csv"
+
+FDRandSensitivity <- read_csv(paste(path,filename, sep = ""))
+conf <- read_csv(paste(path,filename1, sep = ""))
+conf <- conf %>% select(-ends_with("3"))
+```
+
+```{r}
+FDRandSensitivity$value[FDRandSensitivity$class == "Sensitivity" & is.na(FDRandSensitivity$value)] <- 0
+FDRandSensitivity <-  FDRandSensitivity %>% mutate(line = ifelse(class == "FDR", 5,NA) )
+```
+
+
+
+
+
+
+```{r Performance plot}
+nr <- 150
+c <- c(1,4,10) # filter change
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+p <- performancePlot(FDRandSensitivity, nr, c)
+print(p)
+```
+
+
+
+
+```{r Venn Diagrams, warning = F, plot = F}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+v1 <- makeVenn2(conf, test, t = "TP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) # Data, type, data frame, fold change
+v2 <- makeVenn2(conf, test, t = "FP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v3 <- makeVenn2(conf, test, t = "TN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v4 <- makeVenn2(conf, test, t = "FN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+```
+
+```{r}
+plot <- plot_grid(v1, v2, v3, v4, labels = c("TP", "FP", "TN", "FN"))
+plot
+Nas <- getNA(conf_data, test, r, c, j, m, nr)
+# All methods sum to 100 including the counts found in the NA table. NAs are introduced when the abundance of a given taxa is 0.
+```
+
+
+# FILTER VENN
+
+```{r}
+path <- "./data/dataFinal/noClr/"
+filename1 <- "ConfLogNormalAndNegBinom3#preThresh(0.05)Samplesize9.csv"
+filename2 <- "ConfLogNormalAndNegBinom3#preThresh(0.25)Samplesize9.csv"
+filename3 <- "ConfLogNormalAndNegBinom3#preThresh(0.75)Samplesize9.csv"
+
+conf1 <- read_csv(paste(path,filename1, sep = ""))
+# conf1 <- as.data.frame(t(na.omit(t(conf1))))
+conf1 <- conf1 %>% mutate(filter = "0.05")
+
+conf2 <- read_csv(paste(path,filename2, sep = ""))
+# conf2 <- as.data.frame(t(na.omit(t(conf2))))
+conf2 <- conf2 %>% mutate(filter = "0.25")
+
+conf3 <- read_csv(paste(path,filename3, sep = ""))
+# conf3 <- as.data.frame(t(na.omit(t(conf3))))
+conf3 <- conf3 %>% mutate(filter = "0.75")
+
+confAll <- rbind(conf1, conf2, conf3)
+confAll <- confAll %>% select(-ends_with("3"))
+
+rm(conf1,conf2,conf3)
+```
+
+```{r}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+r = 10
+vennFilter1 <- makeVenn3(confAll, "DESEq2", "TP", r)
+plot(vennFilter1)
+
+vennFilter2 <- makeVenn3(confAll, "DESEq2", "FP", r)
+plot(vennFilter2)
+
+vennFilter3 <- makeVenn3(confAll, "DESEq2", "TN", r)
+plot(vennFilter3)
+
+vennFilter4 <- makeVenn3(confAll, "DESEq2", "FN", r)
+plot(vennFilter4)
+
+plot <- plot_grid(vennFilter1, vennFilter2, vennFilter3, vennFilter4, labels = c("TP", "FP", "TN", "FN"))
+plot
+
+```
+
+Calculate performance filter figure for deseq2
+
+```{r}
+path <- "./data/dataFinal/simulatedMergedClrnoClr/"
+filename1 <- "FDRLogNormalAndNegBinom3All#preThresh(0.05).csv"
+filename2 <- "FDRLogNormalAndNegBinom3All#preThresh(0.25).csv"
+filename3 <- "FDRLogNormalAndNegBinom3All#preThresh(0.75).csv"
+filename4 <- "FDRLogNormalAndNegBinom3All#preThresh(0.1).csv"
+filename5 <- "FDRLogNormalAndNegBinom3All#preThresh(0.15).csv"
+filename6 <- "FDRLogNormalAndNegBinom3All#preThresh(0.50).csv"
+
+fdr1 <- read_csv(paste(path,filename1, sep = ""))
+# fdr1 <- as.data.frame(t(na.omit(t(fdr1))))
+fdr1 <- fdr1 %>% mutate(filter = "0.05")
+
+fdr2 <- read_csv(paste(path,filename2, sep = ""))
+# fdr2 <- as.data.frame(t(na.omit(t(fdr2))))
+fdr2 <- fdr2 %>% mutate(filter = "0.25")
+
+fdr3 <- read_csv(paste(path,filename3, sep = ""))
+# fdr3 <- as.data.frame(t(na.omit(t(fdr3))))
+fdr3 <- fdr3 %>% mutate(filter = "0.75")
+
+fdr4 <- read_csv(paste(path,filename4, sep = ""))
+# fdr4 <- as.data.frame(t(na.omit(t(fdr4))))
+fdr4 <- fdr4 %>% mutate(filter = "0.10")
+
+fdr5 <- read_csv(paste(path,filename5, sep = ""))
+# fdr5 <- as.data.frame(t(na.omit(t(fdr5))))
+fdr5 <- fdr5 %>% mutate(filter = "0.15")
+
+fdr6 <- read_csv(paste(path,filename6, sep = ""))
+# fdr6 <- as.data.frame(t(na.omit(t(fdr6))))
+fdr6 <- fdr6 %>% mutate(filter = "0.50")
+
+fdrAll <- rbind(fdr1, fdr2, fdr3, fdr4, fdr5, fdr6)
+# fdrAll <- fdrAll %>% select(-ends_with("3"))
+
+rm(fdr1,fdr2,fdr3, fdr4, fdr5,fdr6)
+```
+
+```{r}
+# fdrAll$value[fdrAll$class == "Sensitivity" & is.na(fdrAll$value)] <- 0
+fdrAll <-  fdrAll %>% mutate(line = ifelse(class == "FDR", 5,NA) )
+
+nr <- 150
+c <- c(1,4,10) # filter change
+fc <- 10
+
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+test <- performancePlotDESEq(fdrAll, nr, c, fc)
+test
+```
+
+Dispersion figure
+
+```{r}
+dataSim <- read.csv("./data/dataFinal/simulatedMergedClrnoClr/ConfLogNormalAndNegBinom3SampleSize3#preThresh(0.05).csv", check.names = F)
+
+# Cut out the data you need
+dataSimClean <- dataSim %>% select(-method, -pvalueAdj, -class, -contains(as.character(seq(4,9))))# %>% distinct() %>% select("run","taxon", "2.1", "2.2", "2.3")
+
+# Drop empty rows
+dataSimCleanGroupOne <- dataSimClean[rowSums(dataSimClean[3:5]) > 0,]
+
+# Control prevalence
+prevalence <- 0.99
+dataSimCleanGroupOne <- dataSimCleanGroupOne[rowSums(dataSimCleanGroupOne[3:5] > 0, na.rm = T)/ncol(dataSimCleanGroupOne[3:5]) >= prevalence,]
+```
+
+```{r}
+
+
+# Reshape df
+plotDataSimCleanGroupOne <- dataSimCleanGroupOne %>%  pivot_longer(cols = c(-taxon, -run), names_to = "sample", values_to = "count")
+
+# Rel abundance and trans?
+plotDataSimCleanGroupOne <- plotDataSimCleanGroupOne %>% group_by(run, sample) %>% mutate(relAbundance = count/sum(count),
+                                                                      logitTrans = log(((relAbundance-0+0.000000001)/(1-0))/(1-(relAbundance-0)/(1-0))),
+                                                                      logTrans = log10(relAbundance))
+
+# Calculate mean and sd
+plotDataSimCleanGroupOne <- plotDataSimCleanGroupOne %>% group_by(run,taxon) %>% summarise(meanRel = mean(relAbundance),
+                                                                                           stddevRel = sd(relAbundance),
+                                                                                           meanLogit = mean(logitTrans),
+                                                                                           stddevLogit = sd(logitTrans),
+                                                                                           meanLog = mean(logTrans),
+                                                                                           stddevLog = sd(logTrans))
+
+```
+
+
+```{r}
+testPlotDataSimCleanGroupOne <- plotDataSimCleanGroupOne %>% filter(run %in% c(1,2,3))
+
+simP <- testPlotDataSimCleanGroupOne %>% ggplot(mapping = aes(x = meanLog, y = stddevLog))+ # V1 is mean and V2 is std dev
+  geom_point(size = 1)+
+  # geom_smooth(method = loess, color = "seagreen3", alpha = 0.1)+
+  # geom_smooth(method = lm, color = "cornflowerblue", alpha = 0.1)+
+  # stat_cor(method = "pearson", label.x = -1.5, label.y = 0.75, color = "black")+
+  ylim(0,0.8)+
+  ylab(expression("Standard deviation"))+
+  xlab(expression("Mean (log"[10]*"(Relative abundance))"))+
+  guides(color=guide_legend(title="Neighbors"))+
+  scale_x_continuous(limits = c(-5,0),sec.axis = sec_axis(~10^(.)*100, name = "Relative abundance (%)", breaks = c(0.001, 0.005, 0.03,  0.1, 0.3, 1, 3, 10, 30, 50), labels=c("0.001","0.005", "0.03",  "0.1", "0.3", "1", "3", "10", "30", "50")))+
+  theme_classic()+
+  ggtitle("Dispersion of relative abundance of taxon in simulated data")+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+simP
+```
+
+
+
+Real data
+
+```{r}
+dataReal <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+
+# Cut out the data you need
+dataRealClean <- dataReal %>% select(-contains(c(as.character(seq(4,9))))) %>% distinct() %>% select("taxon", "1.1", "1.2", "1.3")
+
+# Drop empty rows
+dataRealCleanGroupOne <- dataRealClean[rowSums(dataRealClean[2:4]) > 0,]
+
+# Control prevalence
+prevalence <- 0.99
+dataRealCleanGroupOne <- dataRealCleanGroupOne[rowSums(dataRealCleanGroupOne[2:4] > 0, na.rm = T)/ncol(dataRealCleanGroupOne[2:4]) >= prevalence,]
+```
+
+```{r}
+
+
+# Reshape df
+plotDataRealCleanGroupOne <- dataRealCleanGroupOne %>%  pivot_longer(cols = c(-taxon), names_to = "sample", values_to = "count")
+
+# Rel abundance and trans?
+plotDataRealCleanGroupOne <- plotDataRealCleanGroupOne %>% group_by(sample) %>% mutate(relAbundance = count/sum(count),
+                                                                      logitTrans = log(((relAbundance-0+0.000000001)/(1-0))/(1-(relAbundance-0)/(1-0))),
+                                                                      logTrans = log10(relAbundance))
+
+# Calculate mean and sd
+plotDataRealCleanGroupOne <- plotDataRealCleanGroupOne %>% group_by(taxon) %>% summarise(meanRel = mean(relAbundance),
+                                                                                           stddevRel = sd(relAbundance),
+                                                                                           meanLogit = mean(logitTrans),
+                                                                                           stddevLogit = sd(logitTrans),
+                                                                                           meanLog = mean(logTrans),
+                                                                                           stddevLog = sd(logTrans))
+
+```
+
+
+```{r}
+
+
+realP <- plotDataRealCleanGroupOne %>% ggplot(mapping = aes(x = meanLog, y = stddevLog))+ # V1 is mean and V2 is std dev
+  geom_point(size = 1)+
+  # geom_smooth(method = loess, color = "seagreen3", alpha = 0.1)+
+  # geom_smooth(method = lm, color = "cornflowerblue", alpha = 0.1)+
+  # stat_cor(method = "pearson", label.x = -1.5, label.y = 0.75, color = "black")+
+  ylim(0,0.8)+
+  ylab(expression("Standard deviation"))+
+  xlab(expression("Mean (log"[10]*"(Relative abundance))"))+
+  guides(color=guide_legend(title="Neighbors"))+
+  scale_x_continuous(limits = c(-5,0),sec.axis = sec_axis(~10^(.)*100, name = "Relative abundance (%)", breaks = c(0.001, 0.005, 0.03,  0.1, 0.3, 1, 3, 10, 30, 50), labels=c("0.001","0.005", "0.03",  "0.1", "0.3", "1", "3", "10", "30", "50")))+
+  theme_classic()+
+  ggtitle("Dispersion of relative abundance of taxon in real data")+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+realP
+```
+
+
+
+
+
+Inspect numbers
+
+```{r}
+dataReal <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+dataReal <- dataReal[,1:9]
+dataReal <- dataReal %>% select(-taxon)
+
+# None are empty
+
+test <- dataReal %>% group_by(oil, location) %>% summarise(n = n())
+
+# same for simulated data
+
+dataSim <- read.csv("./data/dataFinal/simulatedMergedClrnoClr/ConfLogNormalAndNegBinom3SampleSize3#preThresh(0.05).csv", check.names = F)
+dataSim <- dataSim %>% filter(method == "DESEq2")
+# dataSim <- dataSim[,8:13]
+# dataSim <- dataSim %>% select(-taxon)
+
+# None are empty
+
+test1 <- dataSim %>% summarise(n = n())
+
+
+```
+
+
+
+
+
+
+
+Volcanoplots
+
+```{r}
+# https://stackoverflow.com/questions/11053899/how-to-get-a-reversed-log10-scale-in-ggplot2
+reverselog_trans <- function(base = 10) {# exp(1)
+    trans <- function(x) -log(x, base)
+    inv <- function(x) base^(-x)
+    trans_new(paste0("reverselog-", format(base)), trans, inv, 
+              log_breaks(base = base), 
+              domain = c(1e-100, Inf))
+}
+```
+
+
+```{r}
+# Load data
+dataSim <- read.csv("./data/dataFinal/simulatedMergedClrnoClr/ConfAndEffectLogNormalAndNegBinom3Samplesize3#preThresh(0.05).csv", check.names = F)
+
+# Get min sample size
+s <- dataSim %>% select(c(run, method,`1.1`,`1.2`,`1.3`,`2.1`,`2.2`,`2.3`))
+ss <- s %>%  group_by(run,method) %>% summarise_at(c("1.1","1.2","1.3","2.1","2.2","2.3"), sum, na.rm = TRUE)
+ss <- min(ss[3:8])
+
+# Transform to relative abundance
+relAb <- dataSim %>%  group_by(run,method) %>% mutate(across(c("1.1","1.2","1.3","2.1","2.2","2.3"),function(x) x/sum(x)*ss))
+test1 <- relAb %>%  group_by(run,method) %>% summarise_at(c("1.1","1.2","1.3","2.1","2.2","2.3"), sum)
+
+
+dataSim <- relAb %>%  
+ rowwise() %>% # filter(pvalueAdj > 0.000000000000000000000000005)
+  mutate(foldChange = log2(mean(c(`2.1`,`2.2`,`2.3`)+1)/mean(c(`1.1`,`1.2`,`1.3`)+1)),
+         foldChangeAbs = abs(foldChange),
+         foldChangeSd = log2(sqrt((sd(c(`2.1`,`2.2`,`2.3`))^2+1)+(sd(c(`1.1`,`1.2`,`1.3`))^2+1))/2),
+         foldChangeCV = foldChangeSd-foldChangeAbs,
+         meanAbundance = mean(c(`1.1`,`1.2`,`1.3`,`2.1`,`2.2`,`2.3`)))
+
+
+test <- relAb %>%  
+  filter(pvalueAdj <= 0.000000000000000000000000005)
+
+```
+
+
+```{r}
+
+dataSim <- dataSim %>% select(taxon, run, sample_size, n_taxa, n_random, change, diff, "1.1", "1.2", "1.3", "2.1", "2.2", "2.3", everything())
+
+dataSimMethod <- dataSim %>%  
+  filter(method == "ALDEx2")
+plotdataSimMethod <- dataSimMethod %>%  mutate(log_pvalueAdj = log10(pvalueAdj))
+
+
+plotdataSimMethod %>% ggplot()+
+  geom_point(aes(x = foldChange, y = -log_pvalueAdj, color= class))+
+  # scale_y_continuous(trans=reverselog_trans())+
+  # ylim(0,0.0000000005)+
+  geom_hline(yintercept = -log10(0.05), linetype = 2, color = "grey75")+
+  geom_vline(xintercept = 0, linetype = 2, color = "grey75")+
+  # scale_color_manual(values = c("#D94701", "#74C476", "#FD8D3C", "#238B45"))+  #FN, FP, TN, TP
+    scale_color_manual(values = c("#FD8D3C", "#D94701", "#2a9df4", "#238B45"))+  #FN, FP, TN, TP
+  guides(color=guide_legend(title="Type"))+
+  ylim(0,10)+
+  xlab("Log2-fold change")+
+  ylab("- Log10 Adjusted p-values")+
+  ggtitle("Log10 Adjusted p-values versus log2-fold change for ALDEx2 results")+
+  theme_classic()
+```
+
+Logreg plot
+
+
+```{r}
+plotData <- dataSimMethod
+ggplot(plotData, aes(x=foldChangeAbs, y=pvalueAdj))+
+  geom_point(aes(color = class), shape = 21) +
+  geom_smooth(method="glm", method.args = list(family="binomial"), fullrange=TRUE, color = "black") + 
+  # geom_smooth(method="loess")+
+# geom_segment(aes(x=x, y=y, xend= x, yend=glm1$fitted.values)) +
+  # xlim(c(-3,2))+
+  ylab("Adjusted p-value")+
+  xlab("Log2-fold change (Absolute value)")+
+    scale_color_manual(values = c("#FD8D3C", "#D94701", "#238B45", "#238B45"))+
+  guides(color=guide_legend(title="Type"))+
+  theme_classic()+
+  NULL
+```
+
+```{r}
+mod <- glm(pvalueAdj ~ foldChangeCV, family="binomial", data = dataSimMethod)
+nullmod <- glm(pvalueAdj~1, family="binomial", data = dataSimMethod)
+1-logLik(mod)/logLik(nullmod)
+```
+
+
+
+
+
+```{r}
+dataSimMethod <- dataSim %>%  
+  filter(method == "Wilcoxon")
+
+dataSimMethod %>% ggplot()+
+  geom_point(aes(x = foldChange, y = pvalueAdj, color= class))+
+  scale_y_continuous(trans=reverselog_trans(10))+
+  # ylim(0,0.0000000005)+
+  geom_hline(yintercept = 0.05, linetype = 2, color = "grey75")+
+  geom_vline(xintercept = 0, linetype = 2, color = "grey75")+
+  # scale_color_manual(values = c("#D94701", "#74C476", "#FD8D3C", "#238B45"))+  #FN, FP, TN, TP
+    scale_color_manual(values = c("#FD8D3C", "#D94701", "#238B45", "#238B45"))+  #FN, FP, TN, TP
+  guides(color=guide_legend(title="Type"))+
+  xlab("Log2-fold change")+
+  ylab("Adjusted p-values")+
+  ggtitle("Adjusted p-values versus log2-fold change for Student's t-test result")+
+  theme_classic()
+```
+
+
+
+
+Make plot with q-value and real deseq data

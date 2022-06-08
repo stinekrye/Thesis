@@ -1,0 +1,279 @@
+---
+title: "7_realDataAnalysis"
+author: "stinekrye"
+date: "2022-05-20"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r}
+library(tidyverse)
+library(ggpointdensity)
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(qvalue)
+library(kableExtra)
+library(DESeq2)
+library(ALDEx2)
+library(ANCOMBC)
+library(rstatix)
+library(parallel)
+library(ggvenn)
+library(devtools)
+library(RColorBrewer)
+library(venn)
+library(cowplot)
+library(viridis)
+library(compositions)
+library(readxl)
+library(here)
+library(ggpubr)
+library(gtools)
+library(scales)
+
+here::i_am("./analysis/6_dataAnalysis.Rmd")
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+```
+
+
+```{r}
+# Load data
+dataRealFull <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+dataRealFull <- calculateConfusionAndEffectReal(dataRealFull)
+dataRealFull <- dataRealFull %>% mutate(df = "1+2+3") %>% filter(sample == "1.1")
+
+dataReal1.2 <- read.csv("./data/dataFinal/realData/realData(1.2)#preThresh(0.05).csv", check.names = F)
+dataReal1.2 <- calculateConfusionAndEffectReal(dataReal1.2)
+dataReal1.2 <- dataReal1.2 %>% mutate(df = "1+2") %>% filter(sample == "1.1")
+
+dataReal1.3 <- read.csv("./data/dataFinal/realData/realData(1.3)#preThresh(0.05).csv", check.names = F)
+dataReal1.3 <- calculateConfusionAndEffectReal(dataReal1.3)
+dataReal1.3 <- dataReal1.3 %>% mutate(df = "1+3") %>% filter(sample == "1.1")
+
+dataReal2.3 <- read.csv("./data/dataFinal/realData/realData(2.3)#preThresh(0.05).csv", check.names = F)
+dataReal2.3 <- calculateConfusionAndEffectReal(dataReal2.3)
+dataReal2.3 <- dataReal2.3 %>% mutate(df = "2+3") %>% filter(sample == "1.2")
+
+allData <- rbind(dataRealFull, dataReal1.2, dataReal1.3, dataReal2.3)
+allData <- allData %>% select(-c(sample, counts))
+
+# Drop duplicates
+```
+
+# ?time
+Venn diagrams
+```{r}
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+# v1 <- makeVennReal(allData, o = "blank", l = "A", m = "DESEq2")
+# plot(v1)
+# v2 <- makeVennReal(allData, o = "blank", l = "B", m = "DESEq2")
+# plot(v2)
+# # v3 <- makeVennReal(allData, o = "blank", l = "C", m = "DESEq2")
+# plot(v3)
+# v4 <- makeVennReal(allData, o = "MGO+IS", l = "A", m = "DESEq2")
+# plot(v4)
+# v5 <- makeVennReal(allData, o = "MGO+IS", l = "B", m = "DESEq2")
+# plot(v5)
+# v6 <- makeVennReal(allData, o = "MGO+IS", l = "C", m = "DESEq2")
+# plot(v6)
+
+# Remove bad
+plotData <- allData %>% filter(!c(oil == "blank" & location == "C"))
+plotData <- plotData %>% filter(class == "P")
+
+test <- makeVennReal(plotData, oilt = c("MGO+IS", "blank"), loc = c("A", "B", "C"), m = "DESEq2")
+# test +theme(text=element_text(size=21))
+# plot(test)
+```
+
+Venn diagram filter
+```{r}
+# Load data
+dataRealFull005 <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+dataRealFull005 <- calculateConfusionAndEffectReal(dataRealFull005)
+dataRealFull005 <- dataRealFull005 %>% mutate(filter = "0.05") %>% filter(sample == "1.1")
+
+dataRealFull025 <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.25).csv", check.names = F)
+dataRealFull025 <- calculateConfusionAndEffectReal(dataRealFull025)
+dataRealFull025 <- dataRealFull025 %>% mutate(filter = "0.25") %>% filter(sample == "1.1")
+
+dataRealFull075 <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.75).csv", check.names = F)
+dataRealFull075 <- calculateConfusionAndEffectReal(dataRealFull075)
+dataRealFull075 <- dataRealFull075 %>% mutate(filter = "0.75") %>% filter(sample == "1.1")
+
+allData <- rbind(dataRealFull005, dataRealFull025, dataRealFull075)
+allData <- allData %>% select(-c(sample, counts))
+
+# Drop duplicates
+```
+
+
+Venn diagrams
+```{r}
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+# v1 <- makeVennReal(allData, o = "blank", l = "A", m = "DESEq2")
+# plot(v1)
+# v2 <- makeVennReal(allData, o = "blank", l = "B", m = "DESEq2")
+# plot(v2)
+# # v3 <- makeVennReal(allData, o = "blank", l = "C", m = "DESEq2")
+# plot(v3)
+# v4 <- makeVennReal(allData, o = "MGO+IS", l = "A", m = "DESEq2")
+# plot(v4)
+# v5 <- makeVennReal(allData, o = "MGO+IS", l = "B", m = "DESEq2")
+# plot(v5)
+# v6 <- makeVennReal(allData, o = "MGO+IS", l = "C", m = "DESEq2")
+# plot(v6)
+
+# Remove bad
+plotData <- allData %>% filter(!c(oil == "blank" & location == "C"))
+plotData <- plotData %>% filter(class == "P")
+
+test <- makeVennReal2(plotData, oilt = c("MGO+IS", "blank"), loc = c("A", "B", "C"), m = "DESEq2")
+# test +theme(text=element_text(size=21))
+# plot(test)
+```
+
+Venn diagram all methods at filter 
+```{r}
+# Load data
+dataRealFull <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+dataRealFull <- calculateConfusionAndEffectReal(dataRealFull)
+dataRealFull <- dataRealFull %>% filter(sample == "1.1")
+
+allData <- rbind(dataRealFull)
+allData <- allData %>% select(-c(sample, counts))
+
+# Drop duplicates
+```
+
+```{r}
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+# v1 <- makeVennReal(allData, o = "blank", l = "A", m = "DESEq2")
+# plot(v1)
+# v2 <- makeVennReal(allData, o = "blank", l = "B", m = "DESEq2")
+# plot(v2)
+# # v3 <- makeVennReal(allData, o = "blank", l = "C", m = "DESEq2")
+# plot(v3)
+# v4 <- makeVennReal(allData, o = "MGO+IS", l = "A", m = "DESEq2")
+# plot(v4)
+# v5 <- makeVennReal(allData, o = "MGO+IS", l = "B", m = "DESEq2")
+# plot(v5)
+# v6 <- makeVennReal(allData, o = "MGO+IS", l = "C", m = "DESEq2")
+# plot(v6)
+
+# Remove bad
+plotData <- allData %>% filter(!c(oil == "blank" & location == "C"))
+plotData <- plotData %>% filter(class == "P")
+
+test <- makeVennReal3(plotData, oilt = c("MGO+IS", "blank"), loc = c("A", "B", "C"))
+# test +theme(text=element_text(size=21))
+# plot(test)
+```
+
+# Volcano plot of real data
+
+```{r}
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+# Load data
+dataReal <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+dataReal <- calculateConfusionAndEffectReal2(dataReal)
+# Get min sample size
+s <- dataReal %>% select(c(method,oil, location,`1.1`,`1.2`,`1.3`,`2.1`,`2.2`,`2.3`))
+ss <- s %>%  group_by(method, oil, location) %>% summarise_at(c("1.1","1.2","1.3","2.1","2.2","2.3"), sum, na.rm = TRUE)
+ss <- min(ss[4:9])
+
+# Transform to relative abundance
+relAb <- dataReal %>%  group_by(method, oil, location) %>% mutate(across(c("1.1","1.2","1.3","2.1","2.2","2.3"),function(x) x/sum(x)*ss))
+test1 <- relAb %>%  group_by(method, oil, location) %>% summarise_at(c("1.1","1.2","1.3","2.1","2.2","2.3"), sum)
+
+
+dataReal <- dataReal %>%  
+  filter(pvalueAdj > 0.000000000005) %>% rowwise() %>% 
+  mutate(foldChange = log2(mean(c(`1.1`,`1.2`,`1.3`)+1)/mean(c(`2.1`,`2.2`,`2.3`)+1)),
+         foldChangeAbs = abs(foldChange),
+         foldChangeSd = log2(sqrt((sd(c(`1.1`,`1.2`,`1.3`))^2+1)+(sd(c(`2.1`,`2.2`,`2.3`))^2+1))/2),
+         foldChangeCV = foldChangeSd-foldChangeAbs,
+         meanAbundance = mean(c(`1.1`,`1.2`,`1.3`,`2.1`,`2.2`,`2.3`)))
+
+dataRealMethod <- dataReal %>%  
+  filter(method == "DESEq2")
+
+```
+
+
+```{r}
+
+dataRealMethod %>% ggplot()+
+  geom_point(aes(x = foldChange, y = pvalueAdj, color= class))+
+  scale_y_continuous(trans=reverselog_trans(10))+
+  # ylim(0,0.0000000005)+
+  geom_hline(yintercept = 0.05, linetype = 2, color = "grey75")+
+  geom_vline(xintercept = 0, linetype = 2, color = "grey75")+
+  # scale_color_manual(values = c("#D94701", "#74C476", "#FD8D3C", "#238B45"))+  #FN, FP, TN, TP
+    scale_color_manual(values = c("#FD8D3C", "#D94701", "#238B45", "#238B45"))+  #FN, FP, TN, TP
+  guides(color=guide_legend(title="Type"))+
+  xlab("Log2-fold change")+
+  ylab("Adjusted p-values")+
+  ggtitle("Adjusted p-values versus log2-fold change for DESeq2 result")+
+  theme_classic()
+```
+
+
+Logreg
+```{r}
+ggplot(dataRealMethod, aes(x=foldChangeAbs, y=pvalueAdj))+
+  geom_point(aes(color = class), shape =21) +
+  geom_smooth(method="glm", method.args = list(family="binomial"), fullrange=TRUE, color = "black") + 
+  # geom_smooth(method="loess")+
+# geom_segment(aes(x=x, y=y, xend= x, yend=glm1$fitted.values)) +
+  # xlim(c(-3,2))+
+  ylab("Adjusted p-value")+
+  xlab("Log2-fold change (Absolute value)")+
+  scale_color_manual(values = c("#FD8D3C", "#D94701", "#238B45", "#238B45"))+
+  guides(color=guide_legend(title="Type"))+
+  theme_classic()+
+  NULL
+```
+
+
+
+
+
+# Maybe
+
+```{r}
+# NOTE: THIS IS WITH UNADJUSTED P VALUES!!!!
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+#load data
+dataReal <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+dataReal <- calculateConfusionAndEffectReal2pval(dataReal)
+
+test <- dataReal %>% group_by(oil, location, method) %>% group_split()
+
+for(i in 1:length(test)){
+  if(i == 31){
+    next
+  }
+  # test[[i]]$pvalue[test[[i]]$pvalue == 0] <- 0.00005 # Very artificial
+  t <- data.frame("qvalue" = qvalue(test[[i]]$pvalue)$qvalues)
+  test[[i]] <- as.data.frame(test[[i]])
+  # test[[i]] <- cbind(test[[i]], t)
+  # print(t)
+  print(i)
+}
+  
+  filter(oil == "blank", location == "A", method == "DESEq2", sample %in% c("1.1")) # Filtering by a single sample gives all p-values for all comparisons between the two groups
+unique(test$taxon)
+
+
+```
+
+```{r}
+# test <- dataReal %>% group_by(oil, location, method,sample) %>% mutate(qval = qvalue(all(pvalueAdj))$qvalues)
+t <- qvalue(test$pvalueAdj)
+View(t$qvalues)
+```
+

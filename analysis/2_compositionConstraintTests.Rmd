@@ -1,0 +1,648 @@
+---
+title: "compositionConstraintTests"
+author: "stinekrye"
+date: "2022-03-09"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+<style>
+body {
+text-align: justify;
+word-wrap: break-word;
+}
+</style>
+
+# Introduction
+Here I will test how the increase in some taxa influence the closure (conversion from counts to relative abundances, by dividing with the sample sum). 
+<br>
+<br>
+## Overview
+
+* Start simple:
+    + Simulate samples from a case control study (with one test variable like disease or oil exposure) with 5 taxa. Mimic natural variance
+    + Randomly select one taxa to be differentially abundant
+    + Create datasets with different degree of fold changes
+    + Make a reproducible test-suite where you can compare X number of models and create one table or figure which summarizes the false discovery rate and sensitivity of a single run
+        - Figure: Y-axis facets = method. X-axis = fold change. Y-axis = FDR/sensitivity.
+        - Next = Make a figure which holds the results of 5 runs and their averages
+    + Investigate how the FDR and sensitivity changes as the effect of the compositionality constraint increases. Are there any difference between the CODA and non CODA methods?
+
+
+```{r setup, echo = F, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(here)
+here::i_am("./analysis/2_compositionConstraintTests.Rmd")
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+
+library(tidyverse)
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(qvalue)
+library(kableExtra)
+library(DESeq2)
+library(ALDEx2)
+library(ANCOMBC)
+library(rstatix)
+library(parallel)
+library(ggvenn)
+library(devtools)
+library(RColorBrewer)
+library(venn)
+library(cowplot)
+library(viridis)
+library(compositions)
+library(readxl)
+
+
+```
+
+## Simulate data
+
+```{r}
+change <- c(1,10)#c(1,2,3,4,6,8,10)
+sample_size <- c(2)#c(2,3,4,5,6,7,8,9)
+runs <- 1#10
+n_taxa <- 10000
+n_random <- 150#c(0, 5, 50, 75, 150) #c(0, 3, 15, 30, 75, 150)
+tests <- c("ANCOM.BC", "DESEq2", "Wilcoxon") #"DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC"
+v <- 2
+s <- 120
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+```
+
+```{r}
+system.time(
+all_data <- runAll(variables = variables, sample_size = sample_size, n_taxa = n_taxa, runs = runs, change = change, n_random = n_random, seed = s)
+)
+```
+
+
+```{r Save/read data files}
+distribution <- "LogNormalAndNegBinom3"
+file_name <- paste(distribution,
+                   "#n_taxa(", paste(n_taxa, collapse = ","), ")",
+                   "#n_random(", paste(n_random, collapse = ","), ")",
+                   "#n_runs(", paste(runs, collapse = ","), ")", 
+                   "#sample_size(", paste(sample_size, collapse = ","), ")",
+                   "#change(", paste(change, collapse = ","), ")", 
+                   "#tests(", paste(tests, collapse = ","), ")",
+                   "#seed(", s, ")", sep = "")
+  
+write_csv(all_data, paste("./data/compositionConstraintTest_data/", file_name, ".csv", sep = ""))
+```
+
+
+
+
+
+
+
+
+
+## Read in data from file
+
+```{r Read small file}
+all_data <- read_csv("./data/compositionConstraintTest_data/test21-05-2022.csv")
+```
+
+## Calculate FDR and Sensitivity and specificity
+
+```{r Calculate confusion "table" and }
+conf <- calculateConfusion(all_data)
+conf$method <- unlist(strsplit(conf$method, "_"))[!unlist(strsplit(conf$method, "_")) == "pvalsAdj"] # Remove .pvals suffix
+FDRandSensitivity <- calculateFDRandSensitivity(conf)
+```
+
+
+
+
+
+
+
+
+
+
+## Make plots
+
+```{r}
+runs
+change
+sample_size
+n_taxa
+n_random
+```
+
+
+```{r Performance plot}
+nr <- 150
+c <- c(1,4,10) # filter change
+# source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+p <- performancePlot(FDRandSensitivity, nr, c)
+print(p)
+```
+
+
+```{r Venn Diagrams data}
+# source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+
+runs
+change
+sample_size
+n_taxa
+n_random
+
+conf_data <- conf # Data
+test <- tests # Tests
+r = runs # run
+c = "8" # change
+j = "8" # sample_size
+m = "10000" # n_taxa
+nr = "30" # n_random
+```
+
+```{r Venn Diagrams, warning = F, plot = F}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+v1 <- makeVenn2(conf_data, test, t = "TP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) # Data, type, data frame, fold change
+v2 <- makeVenn2(conf_data, test, t = "FP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v3 <- makeVenn2(conf_data, test, t = "TN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v4 <- makeVenn2(conf_data, test, t = "FN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+```
+
+```{r}
+plot <- plot_grid(v1, v2, v3, v4, labels = c("TP", "FP", "TN", "FN"))
+plot
+Nas <- getNA(conf_data, test, r, c, j, m, nr)
+# All methods sum to 100 including the counts found in the NA table. NAs are introduced when the abundance of a given taxa is 0.
+```
+
+
+
+
+
+
+```{r}
+
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+
+chunk_size <- 10000
+runs <- 10 # Lo
+
+test <- largeDftest(
+"./data/dataFinal/noClr/LogNormalAndNegBinom3#preThresh(0.25).csv", runs, chunck_size)
+```
+
+
+
+
+
+
+## Read large data frame from cluster and calculate FDR, Sensitivity and specificity
+
+```{r Read large data frame from cluster}
+# chunk_size <- 10000
+# runs <- 10 # Look in the filename and choose the correct value
+# 
+# # Load new large df and get FDR and sensitivity
+# FDRandSensitivity <- largeDfLoad(
+# "./data/dataFinal/noClr/LogNormalAndNegBinom3#preThresh(0.05).csv", runs, chunck_size)
+# 
+# write_csv(FDRandSensitivity, "./data/dataFinal/Clr/FDRLogNormalAndNegBinom3Clr#preThresh(0.05)NEW.csv")
+
+# Get conf
+path1 <- "./data/dataFinal/noClr/"
+filename1 <- "LogNormalAndNegBinom3#preThresh(0.75)"
+chunk_size <- 10000
+runs <- 10 # Look in the filename and choose the correct value
+sample_size <- 9
+test <- largeDfLoadConf(paste(path1,paste(filename1, ".csv", sep = ""), sep = ""), runs, chunk_size, sample_size)
+write_csv(test, paste(path1,"Conf",filename1,"Samplesize9.csv", sep = ""))
+
+# source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+# # Get conf and effect
+# path1 <- "./data/dataFinal/noClr/"
+# filename1 <- "LogNormalAndNegBinom3#preThresh(0.05)"
+# chunk_size <- 10000
+# runs <- 10 # Look in the filename and choose the correct value
+# sample_size <- 3
+# test <- largeDfLoadConfAndEffect(paste(path1,paste(filename1, ".csv", sep = ""), sep = ""), runs, chunk_size, sample_size)
+# write_csv(test, paste(path1,"ConfAndEffect",filename1,"Samplesize3.csv", sep = ""))
+
+
+# Load FDRandSensitivity from an "old" run
+
+FDRandSensitivity <- read_csv("./data/dataFinal/simulatedMergedClrnoClr/FDRLogNormalAndNegBinom3All#preThresh(0.75).csv")
+
+```
+
+## Make plots
+
+```{r}
+runs
+change
+sample_size
+n_taxa
+n_random
+```
+
+```{r}
+FDRandSensitivity$value[FDRandSensitivity$class == "Sensitivity" & is.na(FDRandSensitivity$value)] <- 0
+FDRandSensitivity <-  FDRandSensitivity %>% mutate(line = ifelse(class == "FDR", 5,NA) )
+```
+
+
+
+```{r Performance plot}
+nr <- 150
+c <- c(1,4,10) # filter change
+fc <- 10
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+p <- performancePlot(FDRandSensitivity, nr, c)
+print(p)
+```
+
+
+```{r}
+
+```
+
+
+
+```{r Venn Diagrams data}
+
+
+runs
+change
+sample_size
+n_taxa
+n_random
+
+conf_data <- conf # Data
+test <- tests # Tests
+r = runs # run
+c = "8" # change
+j = "8" # sample_size
+m = "10000" # n_taxa
+nr = "30" # n_random
+```
+
+```{r Venn Diagrams, warning = F, plot = F}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+v1 <- makeVenn2(conf_data, test, t = "TP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm")) # Data, type, data frame, fold change
+v2 <- makeVenn2(conf_data, test, t = "FP", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v3 <- makeVenn2(conf_data, test, t = "TN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+v4 <- makeVenn2(conf_data, test, t = "FN", r, c, j, m, nr) + theme(plot.margin = unit(c(0, 0, 0, 0), "cm"))# Data, type, data frame, fold change
+```
+
+```{r}
+plot <- plot_grid(v1, v2, v3, v4, labels = c("TP", "FP", "TN", "FN"))
+plot
+Nas <- getNA(conf_data, test, r, c, j, m, nr)
+# All methods sum to 100 including the counts found in the NA table. NAs are introduced when the abundance of a given taxa is 0.
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Other plots
+
+
+```{r p values (Adjusted)}
+p <- conf %>% filter(!pvalueAdj == 1) %>% select(pvalueAdj, method)
+p %>% ggplot(aes(x = pvalueAdj)) +
+  geom_histogram(aes(fill = method), color = "black")+
+  facet_wrap(vars(method))
+```
+
+```{r p values (Not Adjusted)}
+  p <- all_data %>% select(-ends_with(c("effect", "pvalsAdj"))) %>% pivot_longer(cols = !c("taxon", "run", "change", "sample_size", "n_taxa", "n_random", "diff", starts_with(c("1", "2"))), names_to = "method", values_to = "pvalue")
+
+p %>% ggplot(aes(x = pvalue)) +
+  geom_histogram(aes(fill = method), color = "black")+
+  facet_wrap(vars(method))
+```
+
+
+
+
+
+
+# Try with different amount of filtering 
+(Default is prevalence inclusion threshold of 0.05)
+
+```{r}
+change <- c(1,10)#c(1,2,3,4,6,8,10)
+sample_size <- c(2,9)#c(2,3,4,5,6,7,8,9)
+runs <- 1#10
+n_taxa <- 10000
+n_random <- c(0,150)#c(0, 5, 50, 75, 150) #c(0, 3, 15, 30, 75, 150)
+tests <- c("DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC") #"DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC"
+preThresh <- 0.50 #Prevalence threshold
+
+
+v <- 2
+s <- 120
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+```
+
+
+```{r}
+preval0.50 <- runAllFilterChange(variables = variables, sample_size = sample_size, n_taxa = n_taxa, runs = runs, change = change, n_random = n_random, seed = s, preThresh = preThresh)
+```
+
+```{r}
+file_name <- paste(distribution,
+                   "#n_taxa(", paste(n_taxa, collapse = ","), ")",
+                   "#n_random(", paste(n_random, collapse = ","), ")",
+                   "#n_runs(", paste(runs, collapse = ","), ")",
+                   "#sample_size(", paste(sample_size, collapse = ","), ")",
+                   "#change(", paste(change, collapse = ","), ")",
+                   "#tests(", paste(tests, collapse = ","), ")",
+                   "#seed(", s, ")",
+                   "#preThresh(", preThresh,")", sep = "")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#############################
+########## OBSOLETE #########
+#############################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Simulate data
+* Simple data:
+    + Generate (marginal?) probabilities for each taxon using a log-normal distribution
+    + Generate count data for each taxon using the negative binomial distribution
+    + Randomly select differential abundant taxon and make it/them differential abundant. 
+        - Use fold change
+    + Measure how many percent it makes up of the total sample
+    + Measure how much the relative abundance for the other taxa deviates, due to the dominating taxa
+        - How to summarize this knowledge? Table with the 2 x percent deviation for each sample for each method and each fold change.
+
+```{r Simulate data, echo = T} 
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+set.seed(seed)
+######### Variables ######### 
+
+# Initial variables
+n_dataframes <- 1 # Number of dataframes to obtain
+mean_distribution <- "log_normal" #"poisson" #log_normal   Choose the underlying distribution of the microbial abundance data (log_normal is the most correct one right now!)
+run <- 1
+
+# Structure of the "study"
+variables <- 2 # Numbers of variables in the "study" (2 = oil/no oil) MUST NOT BE CHANGED FROM 2! THE CODE FROM LINE 85 AND DOWN DOES NOT WORK PROPERBLY WITH OTHER VALUES
+sample_size <- 3 # The number of samples for each variable
+sizes <- c(11000, 5000, 30000) # Is only used if mean_distribution = poisson. This vector is used to obtain counts of different magnitudes
+n_taxa <- 10 # If this is changed, also change the sizes list to better reflect the amount of low abundance taxon
+change <- c(5) # Fold or percentage change between control and treatment. Cant be below 1
+n_random <- 2 # number of random taxon
+
+random_taxon <- as.integer(runif(n_random,1,n_taxa), seed = seed) # Randomly pick one taxon for differential abundance
+```
+
+```{r Create data frames}
+set.seed(seed)
+######### Data frames ######### 
+# Create different types of dataframes
+
+backgroundData <- createDfList(n_dataframes,variables, sample_size, sizes, n_taxa, change, seed, n_random, run, mean_distribution) # No taxon have different abundance
+relBackgroundData <- relativeAbundance(backgroundData) # Relative abundance for data where no taxa are differential abundant
+diffAbundanceData <- diffAbundance(n_taxa, backgroundData, change, random_taxon, n_dataframes) # One taxon has different abundance
+relDiffAbundanceData <- relativeAbundance(diffAbundanceData) # Relative abundance for data where one taxon are differential abundant
+
+
+metaData <- data.frame("treatment" = c(rep("1", times = sample_size),rep("0", times = sample_size)), row.names = colnames(relBackgroundData[[1]][6:ncol(relBackgroundData[[1]])])) # Works only when variables = 2 # treatment is HARDCODED! Do not change!
+```
+
+
+
+
+
+
+## Test suite
+
+```{r Choose and run tests, message = FALSE}
+# diffAbundanceData <- diffAbundanceData[2:2] # Debug purpose
+list <- c("Student.t.test", "Wilcoxon", "ANCOM.BC", "DESEq2", "ALDEx2") # Choose from: "Student.t.test", "Wilcoxon", "ANCOM.BC", "DESEq2", "ALDEx2", 
+system.time({
+res <- runTests(list, diffAbundanceData, metaData, n_dataframes, variables, seed)
+})
+```
+
+
+
+```{r Calculate FDR, sensitivity and make figure}
+### Data wrangling ###
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R")) # Debug purpose
+conf <- calculateConfusion(res, random_taxon)
+FDRandSensitivity <- calculateFDRandSensitivity(conf)
+fig <- makeFigure(FDRandSensitivity)
+
+### Summaries ###
+short_summary <- conf %>% na.omit %>% group_by(run, change, method, class) %>% summarise(counts = n())
+full_summary <- combineData(diffAbundanceData, conf, n_taxa)
+
+# FDR = What fraction of the significant results are false positives?
+# Sensitivity = What fraction of the TRUE significant different taxon are detected?
+```
+
+
+
+############## FIGURES #################
+```{r Venn Diagrams, warning = F}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+makeVenn2(conf, "TP", "1", "5") # Data, type, data frame, fold change
+makeVenn2(conf, "FP", "1", "5") # Data, type, data frame, fold change
+makeVenn(conf, "TP", "1", "5") # Data, type, data frame, fold change
+# makeVenn(conf, "FP", "1", "5")
+```
+
+
+
+
+```{r Make "Change" figure}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R")) # Debug purpose
+
+# Choose variables
+s <- 3 #sample_size
+nt <- 10 #n_taxa
+nr <- 5 #n_random
+
+fig <- figureChange(FDRandSensitivity, s, nt, nr)
+fig
+```
+
+```{r Make "sample" figure}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R")) # Debug purpose
+
+# Choose variables
+c <- 2 #sample_size
+nt <- 100 #n_taxa
+nr <- 20 #n_random
+
+
+fig2 <- figureSample(FDRandSensitivity, c, nt, nr)
+fig2
+```
+```{r Make "diff" figure}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R")) # Debug purpose
+
+# Choose variables
+s <- 3 #sample_size
+c <- 2 # Change
+nt <- 100 #n_taxa
+
+fig <- figureDiff(FDRandSensitivity, c, s, nt)
+fig
+```
+
+
+
+
+```{r figure, eval = T}
+fig
+```
+
+
+
+
+Notes: NA in conf means empty Taxons in diffAbundanceData
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- ## q value calculation -->
+<!-- ```{r} -->
+<!-- DESEQ2_q <- qvalue(resDESEQ2$pvalue) -->
+
+<!-- summary(DESEQ2_q) -->
+<!-- hist(DESEQ2_q) -->
+<!-- plot(DESEQ2_q) -->
+<!-- ``` -->
+
+
+
+<!-- # Ideas -->
+
+<!-- * Investigate this data mentioned in the ANCOM-BC documentation: The HITChip Atlas data set (Lahti et al. 2014) is available via the microbiome R package (Lahti et al. 2017) in phyloseq (McMurdie and Holmes 2013) format, and via Data Dryad in tabular format. This data set comes with 130 genus-like taxonomic groups across 1006 western adults with no reported health complications. Some subjects have also short time series. -->
+
+# ```{r}
+# #Paralel test
+# system.time({
+# numCores <- detectCores()
+# cl <- makeCluster(4)
+# clusterEvalQ(cl, {
+#   library(phyloseq)
+#   library(DESeq2)
+#   library(ALDEx2)
+#   library(ANCOMBC)
+# })
+# clusterExport(cl, 
+#               "relativeAbundanceParalel")
+# test <- parLapply(cl, diffAbundanceData, fun = runTestsParalel, tests = list, meta = metaData, n_dataframes = n_dataframes, variables = variables, seed = seed)
+# stopCluster(cl)
+# })
+# ```
+
+
+
+```{r p values}
+p <- res$pvalues %>% pivot_longer(cols = !c("taxon", "run", "change"), names_to = "method", values_to = "pvalue")
+p %>% ggplot(aes(x = pvalue, color = method)) +
+  geom_histogram()+
+  facet_wrap(vars(method))
+```
+
+```{r Estimation of how much the calculated relative abundances deviates from the true relative abundance}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+t <- constraint_summary(relBackgroundData, relDiffAbundanceData)
+# All numbers are %
+```
+
+# Compare two summary files
+Obtain them from two runs and remember to name them!
+
+```{r Compare summary files}
+summ <- merge(ntaxa100ndiff10, ntaxa100ndiff2, by = c("run", "change", "method", "class"),suffixes = c(".d10", ".d2"), all = T)
+summ <- summ %>% mutate(counts.d10 = replace(counts.d10, is.na(counts.d10), 0)) %>% mutate(counts.d2 = replace(counts.d2, is.na(counts.d2), 0))
+summ <- summ %>% mutate(diff = counts.d10-counts.d2)
+test <- summ %>% group_by(method, class, change) %>% summarise(diff = sum(diff)) %>% pivot_wider(names_from = method, values_from = diff)
+
+# Negative numbers if d2 is bigger than d10. E.g. the number is bigger when the number of diff abundant taxa are smaller
+
+```
+

@@ -1,0 +1,561 @@
+---
+title: "estimateSimulationParametersFromData"
+author: "stinekrye"
+date: "2022-04-21"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+```{r Load libraries}
+library(here)
+here::i_am("./analysis/estimateSimulationParametersFromData.Rmd")
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+source(here("analysis", "sourceFunctionsEstimateSimulationParametersFromData.R"))
+
+
+
+library(tidyverse)
+library(readxl)
+library(phyloseq)
+library(matrixStats)
+library(vegan)
+```
+
+```{r Load data}
+ASV_table <- read.delim("./data/oil_ASVtable.txt", sep = "\t", check.names = F, row.names = "ASVs")
+sample_data <- read_excel("./data/sampleData.xlsx")
+sample_data <- sample_data %>% column_to_rownames("Samples")
+all_data <- phyloseq(otu_table(ASV_table, taxa_are_rows = T), sample_data(sample_data))
+```
+
+```{r Filter data}
+# Extract GF data
+GF <- subset_samples(all_data, region == "GF")
+
+# Drop samples with sample siza < 10 and empty taxa
+GF <- cleanData(GF)
+
+# Extract DB data
+DB <- subset_samples(all_data, region = "DB")
+
+# Drop samples with sample siza < 10 and empty taxa
+DB <- cleanData(DB)
+```
+
+
+
+
+
+
+
+
+
+? Drop technical replicates ?
+
+
+
+
+
+
+
+
+```{r Estimate mean sample size and sd}
+sampleSizesGF <- round(sample_sums(GF))
+meanSampleSizeGF <- round(mean(sampleSizesGF))
+medianSampleSizeGF <- round(median(sampleSizesGF))
+meanSdSampleSizesGF <- round(sd(sampleSizesGF))
+
+sampleSizesDB <- round(sample_sums(DB))
+meanSampleSizeDB <- round(mean(sampleSizesDB))
+medianSampleSizeDB <- ceiling(median(sampleSizesDB))
+meanSdSampleSizesDB <- round(sd(sampleSizesDB))
+
+hist(sampleSizesGF, breaks = 40)
+hist(sampleSizesDB, breaks = 40, xlab = c("Sample size"), main = c("Disco Bay: Distribution of sample sizes")) # To make it look like the other. We 
+
+d <- data.frame("x" = sampleSizesDB)
+
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "firebrick")+
+  xlab("Sample size")+
+  ylab("Frequency")+
+  ggtitle("Disko Bay: Distribution of sample sizes")+
+  theme_classic()
+```
+
+```{r Estimate mean taxa size across all samples and sd}
+
+GFotuTable <- as.matrix(as.data.frame(otu_table(GF)))
+sdTaxaSizesGF <- round(rowSds(GFotuTable))
+meanSdTaxaSizesGF <- round(mean(sdTaxaSizesGF))
+meanTaxaSizeGF <- round(rowMeans(GFotuTable))
+medianTaxaSizeGF <- round(rowMedians(GFotuTable))
+
+DBotuTable <- as.matrix(as.data.frame(otu_table(DB)))
+sdTaxaSizesDB <- round(rowSds(DBotuTable))
+meanSdTaxaSizesDB <- round(mean(sdTaxaSizesDB))
+meanTaxaSizeDB <- ceiling(rowMeans(DBotuTable))
+medianTaxaSizeDB <- round(rowMedians(DBotuTable))
+
+p <- density(log(meanTaxaSizeGF))
+plot(p)
+p <- density(log(meanTaxaSizeDB))
+plot(p, xlim = range(-1,9), ylim = range(0,0.15))
+
+
+
+
+
+d <- data.frame("x" = meanTaxaSizeDB)
+# Mean across samples
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "firebrick")+
+  xlab("Mean taxa size ")+
+  ylab("Frequency")+
+  scale_x_continuous(trans = "log10")+
+  ggtitle("Disko Bay: Mean taxa size")+
+  theme_classic()
+```
+
+Taking the mean of taxa like this does not make biologial sense. DISCUSSION!
+
+
+
+```{r Estimate dominant taxa in each sample}
+# Highest abundance of a single taxon in each sample
+maxTaxaGF <- apply(GFotuTable, MARGIN=c(2), max) 
+maxTaxaDB <- apply(DBotuTable, MARGIN=c(2), max)
+
+
+# Highest abundance divided with sample sum
+domTaxaRatiosGF <- maxTaxaGF/sampleSizesGF
+domTaxaRatiosDB <- maxTaxaDB/sampleSizesDB
+
+# Look at max/mean/median domination
+domMaxTaxaRatiosGF <- max(domTaxaRatiosGF)
+domMinTaxaRatiosGF <- min(domTaxaRatiosGF)
+domMedianTaxaRatiosGF <- median(domTaxaRatiosGF)
+domMeanTaxaRatiosGF <- mean(domTaxaRatiosGF)
+
+domMaxTaxaRatiosDB <- max(domTaxaRatiosDB)
+domMinTaxaRatiosDB <- min(domTaxaRatiosDB)
+domMedianTaxaRatiosDB <- median(domTaxaRatiosDB)
+domMeanTaxaRatiosDB <- mean(domTaxaRatiosDB)
+
+# Look at histograms to better understand how much of the sample is usually dominated by a single taxon
+hist(domTaxaRatiosGF)
+hist(domTaxaRatiosDB)
+
+
+d <- data.frame("x" = domTaxaRatiosDB)
+
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "firebrick")+
+  xlab("Ratio of dominant taxa to total counts")+
+  ylab("Frequency")+
+  ggtitle("Disko Bay: Dominant taxa ratio")+
+  theme_classic()
+```
+sampleSizesGF[maxTaxaGF/sampleSizesGF == 1]
+Extend the above procedure to get an idea of how likely it is to observe domination by multiple species. How can I use this to adjust how the "diff abundance" step works?
+
+
+? Zeroes ?
+
+```{r}
+
+GFzeroes <- apply(GFotuTable, MARGIN=c(2), function(x) sum(x == 0))
+GFnonZeroes <- apply(GFotuTable, MARGIN=c(2), function(x) sum(x > 0))
+GFzeroPercentage <- GFzeroes/(GFzeroes + GFnonZeroes)
+hist(GFzeroPercentage)
+
+DBzeroes <- apply(DBotuTable, MARGIN=c(2), function(x) sum(x == 0))
+DBnonZeroes <- apply(DBotuTable, MARGIN=c(2), function(x) sum(x > 0))
+DBzeroPercentage <- DBzeroes/(DBzeroes + DBnonZeroes)
+hist(DBzeroPercentage)
+
+
+d <- data.frame("x" = DBzeroPercentage)
+
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "firebrick")+
+  xlab("Percentage of zeroes")+
+  ylab("Frequency")+
+  ggtitle("Disko Bay: Zero percentage")+
+  theme_classic()
+```
+
+```{r}
+test <- rarecurve(t(DBotuTable), step = 500, label = F)
+```
+
+
+Idea: 
+Average percentage in each sample?
+
+
+<!-- # OLD Simulated data -->
+<!-- ```{r Simulate data} -->
+<!-- seed <- 128 -->
+<!-- set.seed(seed) -->
+<!-- change <- c(1) #c(1,2,5,8,15) -->
+<!-- sample_size <-2# c(3,5,10,15,30) -->
+<!-- runs <- 1 # 5 -->
+<!-- n_taxa <- 8000#100 -->
+<!-- n_random <- 0# c(2,5)#c(2,5)  -->
+<!-- v <- 2 -->
+
+
+
+<!-- diff_data_list <- data.frame() -->
+
+<!-- for(k in seq(runs)){ -->
+<!--   s <- k # Is set here, so the abundance is the same for taxon # in entire run k (So we can compare the effect of change + the other variables) -->
+<!--   for(m in n_taxa) { -->
+<!--     for(n in n_random) { -->
+<!--       random_taxon <- sample(m, size = n, replace=F) # Randomly pick one taxon for differential abundance -->
+<!--       for(j in sample_size){ -->
+<!--         for(i in change){ -->
+<!--           d <- createDfLogNormalAndNegBinom2(variables = v, sample_size = j, n_taxa = m, run = k, change = i, n_random = n,random_taxon = random_taxon, seed = s) -->
+<!--           diff <- diffAbundance(df = d, change = i, random_taxon, variables = v) -->
+<!--           diff_data_list <- bind_rows(diff_data_list, diff) -->
+<!--         } -->
+<!--       } -->
+<!--     } -->
+<!--   } -->
+<!-- } -->
+
+
+<!-- SIM <- diff_data_list %>% select(starts_with(c("1", "2"))) -->
+<!-- SIM <- phyloseq(otu_table(SIM, taxa_are_rows = T)) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- SIM <- cleanData(SIM) -->
+<!-- ``` -->
+
+
+<!-- ```{r Estimate mean sample size and sd} -->
+<!-- sampleSizesSIM <- round(sample_sums(SIM)) -->
+<!-- meanSampleSizeSIM <- round(mean(sampleSizesSIM)) -->
+<!-- medianSampleSizeSIM <- round(median(sampleSizesSIM)) -->
+<!-- meanSdSampleSizesSIM <- round(sd(sampleSizesSIM)) -->
+
+<!-- hist(sampleSizesSIM) -->
+<!-- ``` -->
+
+<!-- ```{r Estimate mean taxa size across all samples and sd} -->
+
+<!-- SIMotuTable <- as.matrix(as.data.frame(otu_table(SIM))) -->
+<!-- sdTaxaSizesSIM <- round(rowSds(SIMotuTable)) -->
+<!-- meanSdTaxaSizesSIM <- round(mean(sdTaxaSizesSIM)) -->
+<!-- meanTaxaSizeSIM <- round(rowMeans(SIMotuTable)) -->
+<!-- medianTaxaSizeSIM <- round(rowMedians(SIMotuTable)) -->
+
+<!-- p <- density(log(meanTaxaSizeSIM)) -->
+<!-- plot(p) -->
+<!-- ``` -->
+
+<!-- Taking the mean of taxa like this does not make biologial sense. DISCUSSION! -->
+
+
+
+<!-- ```{r Estimate dominant taxa in each sample} -->
+<!-- # Highest abundance of a single taxon in each sample -->
+<!-- maxTaxaSIM <- apply(SIMotuTable, MARGIN=c(2), max)  -->
+
+
+<!-- # Highest abundance divided with sample sum -->
+<!-- domTaxaRatiosSIM <- maxTaxaSIM/sampleSizesSIM -->
+
+<!-- # Look at max/mean/median domination -->
+<!-- domMaxTaxaRatiosSIM <- max(domTaxaRatiosSIM) -->
+<!-- domMinTaxaRatiosSIM <- min(domTaxaRatiosSIM) -->
+<!-- domMedianTaxaRatiosSIM <- median(domTaxaRatiosSIM) -->
+<!-- domMeanTaxaRatiosSIM <- mean(domTaxaRatiosSIM) -->
+
+<!-- # Look at histograms to better understand how much of the sample is usually dominated by a single taxon -->
+<!-- hist(domTaxaRatiosSIM) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- SIMzeroes <- apply(SIMotuTable, MARGIN=c(2), function(x) sum(x == 0)) -->
+<!-- SIMnonZeroes <- apply(SIMotuTable, MARGIN=c(2), function(x) sum(x > 0)) -->
+<!-- SIMzeroPercentage <- SIMzeroes/(SIMzeroes + SIMnonZeroes) -->
+<!-- hist(SIMzeroPercentage) -->
+<!-- ``` -->
+
+
+
+
+
+
+
+# NEW Simulated data
+```{r Simulate data}
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+source(here("analysis", "sourceFunctionsEstimateSimulationParametersFromData.R"))
+seed <- 120
+set.seed(seed)
+change <- c(10) #c(1,2,5,8,15)
+sample_size <-c(150)# c(3,5,10,15,30)
+runs <- 1 # 5
+n_taxa <- 10000#100
+n_random <- c(150) #2# c(2,5)#c(2,5) 
+v <- 2
+
+
+
+diff_data_list <- data.frame()
+
+for(k in seq(runs)){
+  s <- k # Is set here, so the abundance is the same for taxon # in entire run k (So we can compare the effect of change + the other variables)
+  for(m in n_taxa) {
+    for(n in n_random) {
+      random_taxon <- sample(m, size = n, replace=F) # Randomly pick one taxon for differential abundance
+      for(j in sample_size){
+        for(i in change){
+          d <- createDfLogNormalAndNegBinom3(variables = v, sample_size = j, n_taxa = m, run = k, change = i, n_random = n, seed = s)
+          diff <- diffAbundance(df = d, change = i, random_taxon, variables = v)
+          diff_data_list <- bind_rows(diff_data_list, diff)
+        }
+      }
+    }
+  }
+}
+
+diff_data_list <- diff_data_list %>% select(-starts_with("V"))
+SIM <- diff_data_list %>% select(starts_with(c("1", "2")))
+SIM <- phyloseq(otu_table(SIM, taxa_are_rows = T))
+```
+
+```{r}
+SIM <- cleanData(SIM)
+```
+
+```{r}
+# t <- SIMotuTable[,1:2]
+# test <- rarecurve(t(SIMotuTable), step = 500, label = F)
+```
+
+
+```{r Estimate mean sample size and sd}
+sampleSizesSIM <- round(sample_sums(SIM))
+meanSampleSizeSIM <- round(mean(sampleSizesSIM))
+medianSampleSizeSIM <- round(median(sampleSizesSIM))
+meanSdSampleSizesSIM <- round(sd(sampleSizesSIM))
+
+hist(sampleSizesSIM, breaks = 10)
+
+d <- data.frame("x" = sampleSizesSIM)
+
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "darkgoldenrod3")+
+  xlab("Sample size")+
+  ylab("Frequency")+
+  ggtitle("Simulated data: Distribution of sample sizes")+
+  scale_x_continuous(n.breaks = 5, limits = c(19000,40000))+
+  # xlim(20550,20650)+
+  theme_classic()
+```
+
+
+```{r Estimate mean taxa size across all samples and sd}
+
+SIMotuTable <- as.matrix(as.data.frame(otu_table(SIM)))
+sdTaxaSizesSIM <- round(rowSds(SIMotuTable))
+meanSdTaxaSizesSIM <- round(mean(sdTaxaSizesSIM))
+meanTaxaSizeSIM <- round(rowMeans(SIMotuTable))
+medianTaxaSizeSIM <- round(rowMedians(SIMotuTable))
+
+p <- density(log(meanTaxaSizeSIM), bw = 0.2484)
+plot(p)
+
+d <- data.frame("x" = meanTaxaSizeSIM)
+# Mean across samples
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "darkgoldenrod3")+
+  xlab("Mean taxa size ")+
+  ylab("Frequency")+
+  scale_x_continuous(trans = "log10")+
+  ggtitle("Simulated data: Mean taxa size")+
+  ylim(0,115)+
+  theme_classic()
+
+```
+
+Taking the mean of taxa like this does not make biologial sense. DISCUSSION!
+
+
+
+```{r Estimate dominant taxa in each sample}
+# Highest abundance of a single taxon in each sample
+maxTaxaSIM <- apply(SIMotuTable, MARGIN=c(2), max) 
+
+
+# Highest abundance divided with sample sum
+domTaxaRatiosSIM <- maxTaxaSIM/sampleSizesSIM
+
+# Look at max/mean/median domination
+domMaxTaxaRatiosSIM <- max(domTaxaRatiosSIM)
+domMinTaxaRatiosSIM <- min(domTaxaRatiosSIM)
+domMedianTaxaRatiosSIM <- median(domTaxaRatiosSIM)
+domMeanTaxaRatiosSIM <- mean(domTaxaRatiosSIM)
+
+# Look at histograms to better understand how much of the sample is usually dominated by a single taxon
+hist(domTaxaRatiosSIM)
+
+d <- data.frame("x" = domTaxaRatiosSIM)
+
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "darkgoldenrod3")+
+  xlab("Ratio of dominant taxa to total counts")+
+  ylab("Frequency")+
+  ggtitle("Simulated data: Dominant taxa ratio")+
+  scale_x_continuous(n.breaks = 5, limits = c(0,1))+
+  # ylim(0,50)+
+  theme_classic()
+```
+
+```{r}
+SIMzeroes <- apply(SIMotuTable, MARGIN=c(2), function(x) sum(x == 0))
+SIMnonZeroes <- apply(SIMotuTable, MARGIN=c(2), function(x) sum(x > 0))
+SIMzeroPercentage <- SIMzeroes/(SIMzeroes + SIMnonZeroes)
+hist(SIMzeroPercentage)
+
+d <- data.frame("x" = SIMzeroPercentage)
+
+d %>% ggplot() +
+  geom_histogram(aes(x = x), color = "black", fill = "darkgoldenrod3")+
+  xlab("Percentage of zeroes")+
+  ylab("Frequency")+
+  ggtitle("Simulated data: Zero percentage")+
+  scale_x_continuous(n.breaks = 5, limits = c(0.9,1))+
+  # ylim(0,60)+
+  # xlim(0.9,1)+
+  theme_classic()
+```
+
+
+Dispersion figure
+
+```{r}
+# dataSim <- read.csv("./data/dataFinal/simulatedMergedClrnoClr/ConfLogNormalAndNegBinom3SampleSize3#preThresh(0.05).csv", check.names = F)
+
+# Cut out the data you need
+dataSimClean <- diff_data_list %>% select(-contains(as.character(seq(4,9)))) %>% distinct() %>% select("run","taxon", "2.1", "2.2", "2.3")
+
+# Drop empty rows
+dataSimCleanGroupOne <- dataSimClean[rowSums(dataSimClean[3:5]) > 0,]
+
+# Control prevalence
+prevalence <- 0.99
+dataSimCleanGroupOne <- dataSimCleanGroupOne[rowSums(dataSimCleanGroupOne[3:5] > 0, na.rm = T)/ncol(dataSimCleanGroupOne[3:5]) >= prevalence,]
+```
+
+```{r}
+
+
+# Reshape df
+plotDataSimCleanGroupOne <- dataSimCleanGroupOne %>%  pivot_longer(cols = c(-taxon, -run), names_to = "sample", values_to = "count")
+
+# Rel abundance and trans?
+plotDataSimCleanGroupOne <- plotDataSimCleanGroupOne %>% group_by(run, sample) %>% mutate(relAbundance = count/sum(count),
+                                                                      logitTrans = log(((relAbundance-0+0.000000001)/(1-0))/(1-(relAbundance-0)/(1-0))),
+                                                                      logTrans = log10(relAbundance))
+
+# Calculate mean and sd
+plotDataSimCleanGroupOne <- plotDataSimCleanGroupOne %>% group_by(run,taxon) %>% summarise(meanRel = mean(relAbundance),
+                                                                                           stddevRel = sd(relAbundance),
+                                                                                           meanLogit = mean(logitTrans),
+                                                                                           stddevLogit = sd(logitTrans),
+                                                                                           meanLog = mean(logTrans),
+                                                                                           stddevLog = sd(logTrans))
+
+```
+
+
+```{r}
+testPlotDataSimCleanGroupOne <- plotDataSimCleanGroupOne %>% filter(run %in% c(1,2,3))
+
+simP <- testPlotDataSimCleanGroupOne %>% ggplot(mapping = aes(x = meanLog, y = stddevLog))+ # V1 is mean and V2 is std dev
+  geom_point(size = 1)+
+  # geom_smooth(method = loess, color = "seagreen3", alpha = 0.1)+
+  # geom_smooth(method = lm, color = "cornflowerblue", alpha = 0.1)+
+  # stat_cor(method = "pearson", label.x = -1.5, label.y = 0.75, color = "black")+
+  ylim(0,0.8)+
+  ylab(expression("Standard deviation"))+
+  xlab(expression("Mean (log"[10]*"(Relative abundance))"))+
+  guides(color=guide_legend(title="Neighbors"))+
+  scale_x_continuous(limits = c(-5,0),sec.axis = sec_axis(~10^(.)*100, name = "Relative abundance (%)", breaks = c(0.001, 0.005, 0.03,  0.1, 0.3, 1, 3, 10, 30, 50), labels=c("0.001","0.005", "0.03",  "0.1", "0.3", "1", "3", "10", "30", "50")))+
+  theme_classic()+
+  ggtitle("Dispersion of relative abundance of taxon in sim. data")+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+simP
+```
+
+
+
+Real data
+
+```{r}
+dataReal <- read.csv("./data/dataFinal/realData/realDataFull#preThresh(0.05).csv", check.names = F)
+
+# Cut out the data you need
+dataRealClean <- dataReal %>% select(-contains(c(as.character(seq(4,9))))) %>% distinct() %>% select("taxon", "1.1", "1.2", "1.3")
+
+# Drop empty rows
+dataRealCleanGroupOne <- dataRealClean[rowSums(dataRealClean[2:4]) > 0,]
+
+# Control prevalence
+prevalence <- 0.99
+dataRealCleanGroupOne <- dataRealCleanGroupOne[rowSums(dataRealCleanGroupOne[2:4] > 0, na.rm = T)/ncol(dataRealCleanGroupOne[2:4]) >= prevalence,]
+```
+
+```{r}
+
+
+# Reshape df
+plotDataRealCleanGroupOne <- dataRealCleanGroupOne %>%  pivot_longer(cols = c(-taxon), names_to = "sample", values_to = "count")
+
+# Rel abundance and trans?
+plotDataRealCleanGroupOne <- plotDataRealCleanGroupOne %>% group_by(sample) %>% mutate(relAbundance = count/sum(count),
+                                                                      logitTrans = log(((relAbundance-0+0.000000001)/(1-0))/(1-(relAbundance-0)/(1-0))),
+                                                                      logTrans = log10(relAbundance))
+
+# Calculate mean and sd
+plotDataRealCleanGroupOne <- plotDataRealCleanGroupOne %>% group_by(taxon) %>% summarise(meanRel = mean(relAbundance),
+                                                                                           stddevRel = sd(relAbundance),
+                                                                                           meanLogit = mean(logitTrans),
+                                                                                           stddevLogit = sd(logitTrans),
+                                                                                           meanLog = mean(logTrans),
+                                                                                           stddevLog = sd(logTrans))
+
+```
+
+
+```{r}
+
+
+realP <- plotDataRealCleanGroupOne %>% ggplot(mapping = aes(x = meanLog, y = stddevLog))+ # V1 is mean and V2 is std dev
+  geom_point(size = 1)+
+  # geom_smooth(method = loess, color = "seagreen3", alpha = 0.1)+
+  # geom_smooth(method = lm, color = "cornflowerblue", alpha = 0.1)+
+  # stat_cor(method = "pearson", label.x = -1.5, label.y = 0.75, color = "black")+
+  ylim(0,0.8)+
+  ylab(expression("Standard deviation"))+
+  xlab(expression("Mean (log"[10]*"(Relative abundance))"))+
+  guides(color=guide_legend(title="Neighbors"))+
+  scale_x_continuous(limits = c(-5,0),sec.axis = sec_axis(~10^(.)*100, name = "Relative abundance (%)", breaks = c(0.001, 0.005, 0.03,  0.1, 0.3, 1, 3, 10, 30, 50), labels=c("0.001","0.005", "0.03",  "0.1", "0.3", "1", "3", "10", "30", "50")))+
+  theme_classic()+
+  ggtitle("Dispersion of relative abundance of taxon in real data")+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+realP
+```
+
+

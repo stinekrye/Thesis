@@ -1,0 +1,261 @@
+---
+title: "5_realDataTest"
+author: "stinekrye"
+date: "2022-05-13"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+```{r Load libraries}
+library(here)
+here::i_am("./analysis/5_realDataTest.Rmd")
+source(here("analysis", "sourceFunctions_compositionConstraintTests.R"))
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(phyloseq)
+library(reshape2)
+library(qvalue)
+library(kableExtra)
+library(DESeq2)
+library(ALDEx2)
+library(ANCOMBC)
+library(rstatix)
+library(parallel)
+library(ggvenn)
+library(devtools)
+library(RColorBrewer)
+library(venn)
+library(cowplot)
+library(viridis)
+library(compositions)
+library(vegan)
+```
+
+```{r}
+theme_set(theme_bw())
+pal =  "Set1"# "RdYlGn"# RdYIBu
+scale_colour_discrete <-  function(palname=pal, ...){
+  scale_colour_brewer(palette=palname, direction=-1, ...)
+}
+scale_fill_discrete <-  function(palname=pal, ...){
+  scale_fill_brewer(palette=palname, direction=-1, ...)
+}
+```
+
+```{r Load data}
+ASV_table <- read.delim("./data/oil_ASVtable.txt", sep = "\t", check.names = F, row.names = "ASVs")
+sample_data <- read_excel("./data/sampleData.xlsx")
+sample_data <- sample_data %>% column_to_rownames("Samples")
+sample_data <- sample_data %>% select(-c("timespan", "QPCRCopies", "QPCR_SD","Pressure (Mpa)", "phosphate", "nitrate", "nitrite", "DIC", "DIC_SD"))
+sample_data <- sample_data %>% rename(days = "Days",
+                                        location = "Location")
+tree <-  read_tree("./data/oil_spill.nwk")
+```
+
+```{r Identify replicates and best subgroup (variable: type)}
+# Save rownames
+sample_data <- rownames_to_column(sample_data, var = "rowname")
+
+# Save metadata from DB
+# sample_data <- sample_data %>% filter(region == "DB")
+
+# Assign a unique identifier to each group and count size of groups (Grouped by ALL variables)
+sample_data <- sample_data %>% group_by(region, type, Location,lightDark, depth, Days, oil, nutrient, freeLivingBiofilm) %>% mutate(ID = cur_group_id(), n = n())
+
+# Make column which tells which samples to keep (>=3 replicates)
+sample_data <-  sample_data %>% mutate(keep = ifelse(n >= 3, "T", "F"))
+
+# impute all Days < 40 with 37. In DB data Days = 34, 37 and 38 for three different Locations. I think it is ok to think this as the same
+sample_data <- sample_data %>% mutate(Days = replace(Days, Days < 40, 36))
+
+# impute all Days == 117 with 116. I think it is ok to think this as the same
+sample_data <- sample_data %>% mutate(Days = replace(Days, Days == 117, 116))
+
+#
+sample_data$Days <- as.character(sample_data$Days)
+
+
+# Keep only data with the number of replicates >= 3
+test <- sample_data %>% filter(n >= 3)
+
+# Find the type with most samples with three replicates
+table(test$type) # insitu is largest
+```
+
+```{r Make phyloseq object and subset}
+# Recreate rownames
+sample_data <- column_to_rownames(sample_data, "rowname")
+
+# Make phyloseq object with full data
+data <- phyloseq(otu_table(ASV_table, taxa_are_rows = T), sample_data(sample_data), tree)
+
+# Subset data
+data <- subset_samples(data, region == "DB" & type == "insitu" & keep == "T")
+
+
+# End up with 52 (Yes)
+```
+
+```{r Clean phyloseq data}
+# Remove empty taxa
+data <- prune_taxa(!taxa_sums(data) == 0, data)
+
+# Look at sample size
+sample_sums(data)
+
+# Look at sample rarefaction curve
+asvs <- t(otu_table(data))
+test <- rarecurve(asvs, step = 1000, label = F) # Looks fine even for the small samples
+
+# Remove FG-9_S128_F_filt.fastq.gz. Have been rerun as FG-9_S107. ID 69
+dataClean <- prune_samples(!sample_names(data) == "FG-9_S128_F_filt.fastq.gz", data)
+
+# Transform data to relative abundance
+dataCleanRel <- transform_sample_counts(dataClean, function(x) (100 * x/sum(x) ) )
+
+# Perform clr transformation
+dataCleanClr <- transform_sample_counts(dataCleanRel, clr) # IS SAMPLEWISE!!!!! Hurray!
+
+# Perform log trans
+dataCleanLog <- transform_sample_counts(dataClean, log) # IS SAMPLEWISE!!!!! Hurray!
+```
+
+Notes:
+- The variables in the data are now: Location, Days and oil
+
+
+```{r Explore data: Alpha diversity - Plot 1}
+
+p <- plot_richness(dataCleanClr, x = "Days" , color = "oil", measures = c("InvSimpson"))
+# p <- p + geom_line()
+p <- p + guides(color=guide_legend(title="Oil type"))
+p <- p + facet_wrap("Location")
+# p <- p + scale_x_continuous(breaks = c(1,2,3,4), labels= c("8", "37", "100", "379"))
+p <- p + xlab("Time (Days)")
+p <- p + ylab(" Alpha Diversity (Inverse Simpson Index)")
+p <- p + stat_summary(fun=mean, geom="line")
+# p <- p + scale_y_log10()
+# p$layers[[1]] <- NULL
+p
+
+```
+
+```{r Explore data: Beta diversity - Plot 1}
+dataCleanClr.ord <- ordinate(dataCleanClr, method = "NMDS", distance = "unifrac") #jaccard, chao, binomial, chord, wunifrac, gower, jsd # k3
+
+my_colors <- brewer.pal(9,"Spectral")[c(1,3,5,7,9)]
+p1 = plot_ordination(dataCleanClr, dataCleanClr.ord, type="samples", title="Disko Bay NMDS ordination")
+p1 <- p1 + facet_wrap("Location", labeller = label_both)
+p1 <- p1 + scale_shape_manual(values = c(21,22,24)) #name = "Location", labels = c("Deep", "Sediment", "Surface/Dark", "Surface/Light"))
+# p1 <- p1 + scale_color_manual(values = my_colors, name = "Days")
+p1 <- p1 + geom_point(aes(fill = Days, shape = oil), color = "black", size = 3)
+p1 <- p1 + guides(fill = guide_legend(title = "Days", override.aes = list(shape = 21)),
+                  shape = guide_legend(title = "Oil Type"))
+# guides(fill = guide_legend(override.aes = list(shape = 21)))
+p1 <- p1 + theme_classic()
+print(p1)
+```
+
+```{r Explore data: Beta diversity - Plot 2}
+dataCleanClr.ord <- ordinate(dataCleanClr, method = "NMDS", distance = "unifrac") #jaccard, chao, binomial, chord, wunifrac, gower, jsd # k3
+
+my_colors <- brewer.pal(9,"Spectral")[c(1,3,5,7,9)]
+p2 = plot_ordination(dataCleanClr, dataCleanClr.ord, type="samples", title="Disko Bay NMDS ordination")
+p2 <- p2 + facet_wrap("Days",labeller = label_both)
+p2 <- p2 + scale_shape_manual(values = c(21,22,24)) #name = "Location", labels = c("Deep", "Sediment", "Surface/Dark", "Surface/Light"))
+# p2 <- p2 + scale_color_manual(values = my_colors, name = "Days")
+p2 <- p2 + geom_point(aes(fill = Location, shape = oil), color = "black", size = 3)
+p2 <- p2 + guides(fill = guide_legend(title = "Location", override.aes = list(shape = 21)),
+                  shape = guide_legend(title = "Oil Type"))
+# guides(fill = guide_legend(override.aes = list(shape = 21)))
+p2 <- p2 + theme_classic()
+print(p2)
+```
+
+
+
+Calculate distances and make test
+```{r Explore data: Beta diversity - PERMANOVA}
+do_adonis <- function(phylo, subset){
+dist <- UniFrac(phylo)
+metadata <- data.frame(sample_data(phylo))
+if(subset == TRUE) {
+  test <- adonis2(dist ~ Location + oil, data = metadata, permutations = 9999, by = "margin")
+  return(test)
+}
+test <- adonis2(dist ~ Location + Days + oil, data = metadata, permutations = 9999, by = "margin")
+return(test)
+
+}
+```
+
+Full dataset
+```{r}
+alltime_adonis <- do_adonis(dataCleanClr, subset = F)
+```
+
+
+
+Subsample by timepoint
+```{r}
+onemonth <- subset_samples(dataCleanClr,  Days == 36)
+threemonths <- subset_samples(dataCleanClr,  Days == 116)
+
+
+
+onemonth_adonis <- do_adonis(onemonth, subset = T)
+threemonths_adonis <- do_adonis(threemonths, subset = T)
+
+```
+
+
+
+Noter til beta diversity plot 1:
+- Tid + lokation skiller prøverne helt ad. Hvilke organismer ændrer sig over tid?
+  - Test: Grupper data efter lokation, olie og tid. Sammenlign de to tider indenfor hver lokation. Udvælg evt. to grupper, der er særligt godt adskilt. F.eks. trekanterne i lokation C. VARIABEL SOM TESTES : TID
+  - Test 2: Grupper data efter lokation, olie og tid. Sammenlign de blå cirkler med enten de blå trekanter eller firkanter. VARIABEL SOM TESTES: OLIE (TREATMENT)
+
+Noter til beta diversity plot 2:
+- Lokation er god til at adskille data ved dag 36, men knapt så god ved dag 116. 
+  - Test: Sammenlign de farvede trekanter ved dag 36. Hvilke taxa er forskellige?
+
+
+
+
+Q: Is it a problem that the root in the three is reassigned each time?
+Q: Technical or biological replicates?
+
+# Differential abundance analysis
+
+```{r}
+options(pillar.sigfig=8)
+data <- dataClean
+source(here("analysis", "sourceFunctionsRealDataTest.R"))
+seed <- 120
+prevalence <- 1
+tests <- c("DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC") #"DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC"
+data <- prepareData(data)
+data <- data[-7] # Manually remove data frames which are note complete (missing a sample)
+```
+
+
+```{r}
+test <- runAllReal(data, tests, prevalence, seed)
+write_csv(test, "realDataFull#preThresh(1).csv")
+```
+
+```{r}
+# Redo with duplicates
+
+test <- runAllRealDup(data, tests, prevalence, seed, c("2","3"))
+# write_csv(test, "realData(2.3)#preThresh(1).csv")
+```
+
+
+

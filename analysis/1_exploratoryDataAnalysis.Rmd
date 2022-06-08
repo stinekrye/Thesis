@@ -1,0 +1,356 @@
+---
+title: "1 Exploratory data analysis"
+author: "stinekrye"
+date: "2022-02-04"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+Exploratory data analysis
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(reshape2)
+library(kableExtra)
+library(ggpubr)
+library(readxl)
+library(gtools)
+library(ggpointdensity)
+library(viridis)
+library(ggbeeswarm)
+library(treemapify)
+
+ASV_table <- read.delim("./data/oil_ASVtable.txt", sep = "\t", check.names = F)
+sample_data <- read_excel("./data/sampleData.xlsx")
+```
+
+
+### Investigate the main problems found
+
+**Count data** <br>
+The total number of counts is limited by the sequencing depth, and can’t be compared directly. (Can't be shown by plots)
+
+**Non-normally distributed data** <br>
+Counts are not normally distributed. Neither are compositional data. This rules out t-test and MANOVA (Multivariate analysis of variance, (Anderson 2008))
+
+Conclusion: The closest distribution I can tell is the log-normal distribution, and ~98% of this data set is zeroes!
+
+#### First look at count data
+
+```{r}
+# Transform the data matrix to make it ready for plotting. Add log abundance variable
+ASV_table.plot <- ASV_table %>% pivot_longer(cols = !ASVs, names_to = "sample_name", values_to = "abundance") %>% mutate(log_abundance = log10(abundance))
+
+# Calculate basic statistics
+stats <- ASV_table.plot %>% summarise_at(vars(abundance), list(Min = min, Mean = mean, Max = max, Sd = sd))
+
+stats %>%  
+  kable(caption="Statistics of count data") %>% 
+  kable_styling()
+
+# Calculate the percentage of zeroes in the data set
+zeroes_percentage <- sum(ASV_table.plot$abundance == 0)/nrow(ASV_table.plot)
+message(paste("The percentage of zeroes in the data set is:", round(zeroes_percentage,3), "%", collapse = ""))
+
+# Remove all taxa with zero abundance
+ASV_table.plot <- ASV_table.plot[ASV_table.plot$abundance > 0,]
+
+```
+
+A very large proportion of the data is zeroes. By removing those it is possible to see the pattern of all other taxa abundance:
+```{r}
+ASV_table.plot %>% ggplot(mapping = aes(x = abundance)) +
+  geom_histogram(binwidth = 1000)+
+  ylim(0,100)+
+  ylab("Count")+
+  xlab("Abundance ()")
+```
+
+```{r}
+ASV_table.plot %>% gghistogram(x = "abundance",
+   add = "mean", rug = TRUE, color = "aquamarine3", fill = "aquamarine2", bins= 15, xlab = "Abundance of individual taxa", ylab = "Counts")
+```
+
+
+Plot with log_abundance. This transformation makes it look more like a normal distribution, but it still has a large right tail.
+```{r}
+ASV_table.plot %>% ggdensity(x = "log_abundance",
+   add = "mean", color = "aquamarine3", fill = "aquamarine2", bins= 30, xlab = "Log10 abundance of individual taxa", ylab = "Density")
+```
+
+#### Then look at compositional data
+
+```{r}
+ASV_table.plot <- ASV_table.plot %>% group_by(sample_name) %>% mutate(sample_sum = sum(abundance),
+                                                            rel_abundance = abundance/sum(abundance),
+                                                            log_rel_abundance = log10(rel_abundance)) %>% ungroup()
+
+# Remove samples with sum lower than 20
+ASV_table.plot <- ASV_table.plot[ASV_table.plot$sample_sum > 20,]
+
+stats <- ASV_table.plot %>% summarise_at(vars(rel_abundance), list(Min = min, Mean = mean, Max = max, Sd = sd))
+dominant <- ASV_table.plot[ASV_table.plot$rel_abundance > 0.8,]
+
+
+stats %>%  
+  kable(caption="Statistics of relative abundance") %>% 
+  kable_styling()
+
+```
+
+
+The data looks approx. log-normal distributed
+
+```{r}
+ASV_table.plot %>% ggplot(mapping = aes(x = rel_abundance)) +
+  geom_histogram(binwidth = 0.0001)+
+  xlim(0.000001,0.5)+
+  ylim(0,13000)+
+  NULL
+```
+
+After a log transformation the data looks more normal, but does still deviate from (log) normal at very large and small relative abundances.
+
+```{r}
+
+ASV_table.plot %>% ggplot(mapping = aes(x = log10(rel_abundance))) +
+  geom_histogram(binwidth = 0.1)
+```
+
+```{r}
+ASV_table.plot %>% ggdensity(x = "log_rel_abundance",
+   add = "mean", color = "aquamarine3", fill = "aquamarine2", bins= 15, xlab = "Log 10 relative abundance of individual taxa", ylab = "Density")
+```
+
+Normality tests
+
+Log absolute abundance
+```{r}
+ggqqplot(ASV_table.plot$log_abundance) %>% ggpar(main = "Log10 abundance")
+```
+
+Log relative abundance
+```{r}
+ggqqplot(ASV_table.plot$log_rel_abundance) %>% ggpar(main = "Log10 relative abundance")
+```
+
+
+** Heteroscedasticity over a large dynamic range: **  <br>
+(Love, Huber, and Anders 2014) Can’t use MANOVA and T-test. At least we need some transformations. In general I think it is hard to detect any difference in data if the dispersion is different AND the data does not follow a distribution.
+
+IMPORTANT NOTE! All ASVs which has zero counts has been removed already!
+Here I remove all ASVs which is NOT present in both of the replicates! This is a HUGE part of the remaining ASVs!
+
+```{r}
+#Add sampleName variable to data
+sample_data <- sample_data %>% select(Samples, sampleName)
+ASV_table.plot <- merge(x = ASV_table.plot, y = sample_data, by.x = "sample_name", by.y = "Samples") %>%  select(ASVs,log_abundance, abundance, rel_abundance, sampleName)
+
+# Calculate the percentage of zeroes in the data set already removed
+message(paste("The percentage of zeroes in the data set is:", round(zeroes_percentage,3), "%", collapse = ""))
+
+
+total_ASVs <- nrow(ASV_table.plot)
+removed_ASVs <- ASV_table.plot %>% group_by(ASVs, sampleName) %>% filter(n() < 2)
+percentage_removed <- nrow(removed_ASVs)/total_ASVs
+
+message(paste("Of the remaining part of the data set :", round(percentage_removed,3), "% are not present in both replicates and are removed", collapse = ""))
+
+message(paste("Now we are left with", round((1-zeroes_percentage)*(1-percentage_removed),4), "% of the original data set", collapse = ""))
+```
+
+
+```{r}
+# Caluclate mean of each ASV in each sample
+# Remove ASVs from the sample if they are only found once in that sample
+ASV_table.plot <- ASV_table.plot %>% group_by(ASVs, sampleName) %>% filter(n() >= 2) %>% ungroup()
+
+# Calculate mean and sd for each ASV in each sample
+ASV_table.plot <- ASV_table.plot %>% group_by(ASVs, sampleName) %>% mutate(abs_mean = mean(abundance),
+                                                                           abs_sd = sd(abundance),
+                                                                           rel_mean = mean(rel_abundance),
+                                                                           rel_sd = sd(rel_abundance)) %>% ungroup()
+
+message("Absolute abundance and relative abundance show the same pattern.")
+ASV_table.plot %>%  ggplot(mapping = aes(x = abs_mean, y = abs_sd))+
+  geom_pointdensity()+
+  scale_color_viridis(option = "F")+
+  geom_smooth(method = loess, color = "seagreen3")+
+  geom_smooth(method = lm, color = "cornflowerblue")+
+  stat_cor(method = "pearson", label.x = 0, label.y = 40000, color = "black")+
+  ylab(expression("Standard deviation (relative abundance)"))+
+  xlab(expression("Mean (relative abundance)"))+
+  guides(color=guide_legend(title="Neighbors"))+
+  theme_classic()
+```
+
+How to interpret these plot?
+
+```{r}
+message(" By dividing the standard deviation with the mean, we get this pattern")
+ASV_table.plot %>%  ggplot(mapping = aes(x = abs_mean, y = abs_sd/abs_mean))+
+  geom_pointdensity()+
+  scale_color_viridis(option = "F")+
+  geom_smooth(method = loess, color = "seagreen3")+
+  geom_smooth(method = lm, color = "cornflowerblue")+
+  stat_cor(method = "pearson", label.x = 10000, label.y = 2, color = "black")+
+  # ylab(expression("Standard deviation (RA"^logit*")"))+
+  # xlab(expression("Mean (RA"^logit*")"))+
+  guides(color=guide_legend(title="Neighbors"))
+```
+
+Conclusion: The higher the variation is proportional to the size of the ASV!
+
+Transformations which might fix this:
+
+```{r}
+# Transformations of the relative abundance
+ASV_table.plot <- ASV_table.plot %>%  mutate(log_rel_abundance = log10(rel_abundance),
+                                   log_it_rel_abundance = logit(rel_abundance, min = 0, max = 1)) %>% ungroup() # Add little constant?
+
+# Calculate mean and sd
+ASV_table.plot <- ASV_table.plot %>% group_by(ASVs, sampleName) %>% mutate(mean_log_rel_abundance = mean(log_rel_abundance),
+                                                                 sd_log_rel_abundance = sd(log_rel_abundance),
+                                                                 mean_logit_rel_abundance = mean(log_it_rel_abundance),
+                                                                 sd_logit_rel_abundance = sd(log_it_rel_abundance)) %>% ungroup()
+
+```
+
+
+Logarithmic transformation
+
+```{r}
+subset <- ASV_table.plot[1:1000,]
+```
+
+
+```{r}
+ASV_table.plot %>%  ggplot(mapping = aes(x = mean_log_rel_abundance, y = sd_log_rel_abundance))+
+  geom_pointdensity()+
+  scale_color_viridis(option = "F")+
+  geom_smooth(method = loess, color = "seagreen3")+
+  geom_smooth(method = lm, color = "cornflowerblue")+
+  stat_cor(method = "pearson", label.x = -5, label.y = 2, color = "black")+
+  guides(color=guide_legend(title="Neighbors"))+
+  ylab(expression("Standard deviation (log10 relative abundance)"))+
+  xlab(expression("Mean (log10 relative abundance)"))+
+  scale_x_continuous(sec.axis = sec_axis(~10^.*100, name = "Relative abundance (%)", breaks = c(0.001, 0.003, 0.01, 0.03,  0.1, 0.3, 1, 3, 10, 30, 50, 80), labels=c("0.001", "0.003", "0.01", "0.03",  "0.1", "0.3", "1", "3", "10", "30", "50", "80")))+
+  theme_classic()
+```
+
+
+Log-it transformation
+```{r}
+ASV_table.plot %>%  ggplot(mapping = aes(x = mean_logit_rel_abundance, y = sd_logit_rel_abundance))+
+  geom_pointdensity()+
+  scale_color_viridis(option = "F")+
+  geom_smooth(method = loess, color = "seagreen3")+
+  geom_smooth(method = lm, color = "cornflowerblue")+
+  stat_cor(method = "pearson", label.x = -11, label.y = 5, color = "black")+
+  guides(color=guide_legend(title="Neighbors"))+
+  scale_x_continuous(sec.axis = sec_axis(~inv.logit(.)*100, name = "Relative abundance (%)", breaks = c(0.003, 0.01, 0.03,  0.1, 0.3, 1, 3, 10, 30, 50, 80), labels=c("0.003", "0.01", "0.03",  "0.1", "0.3", "1", "3", "10", "30", "50", "80")))+
+  ylab(expression("Standard deviation (logit relative abundance)"))+
+  xlab(expression("Mean (logit relative abundance)"))+
+  theme_classic()
+```
+
+
+
+Logit relative abundance
+```{r}
+ggqqplot(ASV_table.plot$log_it_rel_abundance) %>% ggpar(main = "Logit relative abundance")
+
+ASV_table.plot %>% ggdensity(x = "log_it_rel_abundance",
+   add = "mean", color = "aquamarine3", fill = "aquamarine2", bins= 15, xlab = "Logit relative abundance of individual taxa", ylab = "Density")
+```
+
+
+
+
+** Outliers: ** <br>
+Can drag the estimates/models
+- It is hard to tell outliers apart from the rest of the data in this huge data set. I do not think this needs explannation.
+- From the plots it is clear that the sd diverges around the very small / very large ASV sizes
+
+
+** Number of taxa outnumber the samples: ** <br>
+(Anderson 2008)
+```{r}
+dim_ASV <- dim(ASV_table)
+message(paste("The dimension of the data is:", paste(dim_ASV, collapse = "/"), "(taxa/samples)", collapse = ""))
+```
+
+**Small replicate numbers** <br>
+Is due to the cost of sequencing, which is fortunately decreasing. Results in lower power, uncertainty of within group variation. Pool samples (Love, Huber, and Anders 2014)
+- It does not make sense to show this. I know that each group is only duplicates.
+
+
+
+```{r}
+composition <- data.frame("Category" = c("Zeroes", "Singletons", "Duplicates"), "Values" = c(round(zeroes_percentage,4), 
+                                                                                             round((1-zeroes_percentage)*percentage_removed,4),
+                                                                                             round((1-zeroes_percentage)-(1-zeroes_percentage)*percentage_removed,4)))
+
+
+composition %>% ggplot(aes(area = Values, fill = Category)) +
+  geom_treemap()
+```
+
+
+Block diagram for distribution of abundances (using bins)
+
+
+
+# Estimate fold change
+
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(matrixStats)
+
+ASV_table <- read.delim("./data/oil_ASVtable.txt", sep = "\t", check.names = F)
+```
+
+```{r}
+library(MatrixGenerics)
+test <- ASV_table[1:10,] %>% select(-ASVs)
+test[test == 0] <- NA
+test <- as.matrix(test)
+rowmed <- rowMedians(test, na.rm = T)
+rowmax <- rowMaxs(test, na.rm = T)
+diff <- rowmax/rowmed
+
+
+
+test <- test %>% select(-ASVs)
+test <- as.matrix(t(test))
+
+
+
+
+
+
+colCV <- colSds(test)/colmeans(test)
+
+
+test <-test %>% 
+  mutate(min = min(across(everything())+1),
+         max = max(across(everything())+1),
+         Sum = sum(across(everything())),
+         CV = sd/Mean) %>% arrange(desc(CV))
+
+
+test %>% ggplot(aes(x))
+
+
+test2 <- ASV_table[1:10,]
+test %>% ggplot(aes(x = ASVs))
+
+# test <- ASV_table %>% select(-ASVs) %>% mutate(sd = sd(across(everything())))
+```
+
+
+
+

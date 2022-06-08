@@ -1,0 +1,32 @@
+---
+title: "4_investigateFdrInflation"
+author: "stinekrye"
+date: "2022-05-03"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+The performance figures produced for all filtering steps shows that FDR increases as the sample size increases. This is contra intuitive, becuase we should have higher statistical power when the number of samples increase
+
+```{r Define variables}
+
+# DO NOT CHANGE! MAKE NEW SCRIPT. THESE ARE THE DEFAULT VALUES USED FOR ALL RUNS IN THE FOLDERdataFromClusterMoreFiltering
+change <- c(1,2,3,4,6,8,10)
+sample_size <- c(2,3,4,5,6,7,8,9)
+runs <- 10
+n_taxa <- 10000
+n_random <- c(0, 5, 50, 75, 150) #c(0, 3, 15, 30, 75, 150)
+tests <- c("DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC") #"DESEq2", "Wilcoxon", "Student.t.test", "ALDEx2", "ANCOM.BC"
+v <- 2
+s <- 120
+```
+
+```{r}
+# Read data. Do ONLY try for one of the small files
+
+all_data <- read_csv("./data/dataFromClusterMoreFiltering/LogNormalAndNegBinom3#preThresh(0.75).csv")
+conf <- calculateConfusion(all_data)
+```
+
